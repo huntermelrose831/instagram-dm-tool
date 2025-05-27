@@ -10,6 +10,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "apify-client": "^2.12.4",
+    "dotenv": "^16.5.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-icons": "^5.5.0",
