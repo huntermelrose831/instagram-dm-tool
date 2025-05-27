@@ -3,14 +3,39 @@ const cors = require("cors");
 const { scrapeInbox, sendDMs } = require("./sendDMs");
 const accountsStore = require("./accountsStore");
 const targetsStore = require("./targetsStore");
-require("dotenv").config();
-const { ApifyClient } = require("apify-client");
-
 const app = express();
 const PORT = 5000;
-const apifyClient = new ApifyClient({
-  token: process.env.APIFY_TOKEN,
-});
+require("dotenv").config();
+const { ApifyClient } = require("apify-client");
+const apifyToken = process.env.APIFY_TOKEN;
+const apifyClient = new ApifyClient({ token: apifyToken });
+      .filter(post => post.comments && Array.isArray(post.comments))
+      .flatMap(post => post.comments)
+      .filter(comment => comment.ownerUsername)
+      .map(comment => ({
+        username: comment.ownerUsername,
+        fullName: comment.ownerFullname || "",
+        profileUrl: `https://instagram.com/${comment.ownerUsername}`,
+        comment: comment.text || "",
+        timestamp: comment.timestamp || ""
+      }))
+      // Remove duplicates based on username
+      .filter((lead, index, self) => 
+        index === self.findIndex(l => l.username === lead.username)
+      )aper actor to get post data with comments
+    const run = await apifyClient.actor("apify/instagram-scraper").call({
+      directUrls: [postUrl],
+      resultsType: "posts",
+      searchType: "user",
+      searchLimit: 1,
+      resultsLimit: 1,
+      expandOwners: true,
+      includeComments: true,
+      commentsLimit: 100 // Get up to 100 comments per post
+    });uire("dotenv").config();
+const { ApifyClient } = require("apify-client");
+const apifyToken = process.env.APIFY_TOKEN;
+const apifyClient = new ApifyClient({ token: apifyToken });
 
 app.use(cors({ origin: "*", credentials: true }));
 app.use(express.json());
@@ -256,47 +281,89 @@ app.get("/api/leads", async (req, res) => {
 });
 
 app.post("/api/leads/apify", async (req, res) => {
-  const { postUrl, limit } = req.body;
+  const { postUrl } = req.body;
   if (!postUrl)
     return res
       .status(400)
       .json({ status: "error", message: "Missing post URL" });
   try {
-    console.log("Fetching comments for post:", postUrl); // Start the Apify Instagram Scraper actor to get post data with comments
-    const run = await apifyClient
-      .actor("apify/instagram-comment-scraper")
-      .call({
-        directUrls: [postUrl],
-        resultsType: "posts",
-        searchLimit: 1,
-        resultsLimit: 1,
-        expandOwners: true,
-        includeComments: true,
-        commentsLimit: 100,
-        maxRequestsPerCrawl: 100,
-      });
+    // Start the Apify Instagram Scraper actor to get comments
+    const run = await apifyClient.actor("apify/instagram-scraper").call({
+      directUrls: [postUrl],
+      resultsType: "comments",
+      searchType: "posts",
+      searchLimit: 1,
+      resultsLimit: 200, // Get more comments
+      expandOwners: true, // Get commenter details
+    });
+
+    // Fetch results from the default dataset
     const { items } = await apifyClient
       .dataset(run.defaultDatasetId)
       .listItems();
-    console.log("Received items:", items);
-    if (items.length === 0 || (items[0] && items[0].error === "no_items")) {
-      throw new Error(
-        "Could not fetch post data. Make sure the post exists and is public."
-      );
-    }
-    let leads = items
+
+    // Extract unique commenters and their data
+    const leads = items
       .filter((item) => item.comments && Array.isArray(item.comments))
-      .flatMap((item) => {
-        return item.comments
-          .filter((comment) => comment.ownerUsername)
-          .map((comment) => comment.ownerUsername);
-      })
-      // Remove duplicates
-      .filter((username, index, self) => self.indexOf(username) === index);
-    // Apply limit if provided
-    if (limit && Number.isInteger(Number(limit))) {
-      leads = leads.slice(0, Number(limit));
-    }
+      .flatMap((item) => item.comments)
+      .filter((comment) => comment.ownerUsername)
+      .map((comment) => ({
+        username: comment.ownerUsername,
+        fullName: comment.ownerFullname || "",
+        profileUrl: `https://instagram.com/${comment.ownerUsername}`,
+        comment: comment.text || "",
+        timestamp: comment.timestamp || "",
+      }))
+      // Remove duplicates based on username
+      .filter(
+        (lead, index, self) =>
+          index === self.findIndex((l) => l.username === lead.username)
+      );
+
+    res.json({ status: "success", leads });
+  } catch (err) {
+    console.error("Apify error:", err);
+    res.status(500).json({ status: "error", message: err.message });
+  }
+});
+
+app.post("/api/leads/comments", async (req, res) => {
+  const { postUrl } = req.body;
+  if (!postUrl)
+    return res.status(400).json({ status: "error", message: "Missing post URL" });
+  try {
+    // Start the Apify Instagram Scraper actor
+    const run = await apifyClient.actor("apify/instagram-scraper").call({
+      directUrls: [postUrl],
+      resultsType: "posts",
+      searchType: "hashtag",  // Using hashtag as it's more permissive
+      searchLimit: 1,
+      resultsLimit: 1,
+      expandOwners: true,
+      includeComments: true,
+      commentsLimit: 100
+    });
+
+    // Fetch results from the default dataset
+    const { items } = await apifyClient.dataset(run.defaultDatasetId).listItems();
+
+    // Extract unique commenters and their data
+    const leads = items
+      .filter(post => post.comments && Array.isArray(post.comments))
+      .flatMap(post => post.comments)
+      .filter(comment => comment.ownerUsername)
+      .map(comment => ({
+        username: comment.ownerUsername,
+        fullName: comment.ownerFullname || "",
+        profileUrl: `https://instagram.com/${comment.ownerUsername}`,
+        comment: comment.text || "",
+        timestamp: comment.timestamp || ""
+      }))
+      // Remove duplicates based on username
+      .filter((lead, index, self) => 
+        index === self.findIndex(l => l.username === lead.username)
+      );
+
     res.json({ status: "success", leads });
   } catch (err) {
     console.error("Apify error:", err);

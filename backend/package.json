@@ -7,8 +7,12 @@
     "start": "node server.js"
   },
   "dependencies": {
+    "@chakra-ui/react": "^3.19.1",
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.0",
     "cors": "^2.8.5",
     "express": "^4.18.2",
+    "framer-motion": "^12.14.0",
     "puppeteer": "^24.9.0"
   }
 }
