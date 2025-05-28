@@ -1,20 +1,20 @@
 import React, { useState, useEffect } from "react";
 
 const Targets = () => {
-  const [targets, setTargets] = useState([]);
-  const [newTarget, setNewTarget] = useState("");
+  const [usernames, setUsernames] = useState([]);
+  const [newUsername, setNewUsername] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  // Load saved targets from backend
+  // Load saved usernames from backend
   useEffect(() => {
     fetch("http://localhost:5000/api/targets")
       .then((r) => r.json())
-      .then((data) => setTargets(data.targets || []));
+      .then((data) => setUsernames(data.targets || []));
   }, []);
 
-  // Add a new target
-  const addTarget = async (username) => {
+  // Add a new username
+  const addUsername = async (username) => {
     setError("");
     setSuccess("");
     if (!username) return;
@@ -26,19 +26,19 @@ const Targets = () => {
       });
       const data = await res.json();
       if (data.status === "success") {
-        setTargets(data.targets);
-        setSuccess("Target added!");
-        setNewTarget("");
+        setUsernames(data.targets);
+        setSuccess("Username added!");
+        setNewUsername("");
       } else {
-        setError(data.message || "Failed to add target");
+        setError(data.message || "Failed to add username");
       }
     } catch (e) {
       setError("Failed to connect to backend");
     }
   };
 
-  // Remove a target
-  const removeTarget = async (username) => {
+  // Remove a username
+  const removeUsername = async (username) => {
     setError("");
     setSuccess("");
     try {
@@ -47,9 +47,9 @@ const Targets = () => {
       });
       const data = await res.json();
       if (data.status === "success") {
-        setTargets(data.targets);
+        setUsernames(data.targets);
       } else {
-        setError(data.message || "Failed to remove target");
+        setError(data.message || "Failed to remove username");
       }
     } catch (e) {
       setError("Failed to connect to backend");
@@ -58,24 +58,24 @@ const Targets = () => {
 
   return (
     <div className="p-8 max-w-2xl mx-auto">
-      <h1 className="text-2xl font-bold mb-4">Saved Targets</h1>
+      <h1 className="text-2xl font-bold mb-4">Saved Usernames</h1>
       <form
         className="mb-6 flex gap-2"
         onSubmit={(e) => {
           e.preventDefault();
-          addTarget(newTarget.trim());
+          addUsername(newUsername.trim());
         }}
       >
         <input
           className="border rounded px-2 py-1 flex-1"
           placeholder="Add Instagram username"
-          value={newTarget}
-          onChange={(e) => setNewTarget(e.target.value)}
+          value={newUsername}
+          onChange={(e) => setNewUsername(e.target.value)}
         />
         <button
           type="submit"
           className="bg-blue-500 text-white px-4 py-1 rounded font-semibold hover:bg-blue-600"
-          disabled={!newTarget.trim()}
+          disabled={!newUsername.trim()}
         >
           Add
         </button>
@@ -92,19 +92,19 @@ const Targets = () => {
             </tr>
           </thead>
           <tbody>
-            {targets.length === 0 && (
+            {usernames.length === 0 && (
               <tr>
                 <td colSpan={3} className="text-gray-500 py-4 text-center">
-                  No targets saved.
+                  No usernames saved.
                 </td>
               </tr>
             )}
-            {targets.map((t, i) => (
+            {usernames.map((u, i) => (
               <tr key={i}>
-                <td className="py-2 px-4 border-b">{t}</td>
+                <td className="py-2 px-4 border-b">{u}</td>
                 <td className="py-2 px-4 border-b">
                   <a
-                    href={`https://instagram.com/${t}`}
+                    href={`https://instagram.com/${u}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-blue-600 hover:underline"
@@ -115,7 +115,7 @@ const Targets = () => {
                 <td className="py-2 px-4 border-b">
                   <button
                     className="text-red-600 hover:underline"
-                    onClick={() => removeTarget(t)}
+                    onClick={() => removeUsername(u)}
                   >
                     Remove
                   </button>
