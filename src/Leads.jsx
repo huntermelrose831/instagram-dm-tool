@@ -7,7 +7,6 @@ const Leads = () => {
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [limit, setLimit] = useState(10); // Default to 10 usernames
 
   useEffect(() => {
     fetch("http://localhost:5000/api/accounts")
@@ -27,41 +26,15 @@ const Leads = () => {
           "Please enter a valid Instagram post URL (e.g., https://instagram.com/p/ABC123)"
         );
       }
-
-      const res = await fetch("http://localhost:5000/api/leads/apify", {
+      const res = await fetch("http://localhost:5000/api/scrape", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ postUrl, limit }),
+        body: JSON.stringify({ postUrl }),
       });
       const data = await res.json();
       if (data.status === "success") {
-        setLeads(data.leads);
-        // Add all usernames to targets
-        const addAll = async () => {
-          for (const lead of data.leads) {
-            if (lead.username) {
-              try {
-                const res = await fetch("http://localhost:5000/api/targets", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ username: lead.username }),
-                });
-                const data = await res.json();
-                if (data.status !== "success") {
-                  console.log(
-                    `Failed to add target ${lead.username}: ${data.message}`
-                  );
-                }
-              } catch (error) {
-                console.log(
-                  `Error adding target ${lead.username}: ${error.message}`
-                );
-              }
-            }
-          }
-        };
-        addAll().catch((err) => console.error("Error adding targets:", err));
-      } else setError(data.message || "Failed to fetch leads");
+        setLeads(Array.isArray(data.usernames) ? data.usernames : []);
+      } else setError(data.message || "Failed to fetch usernames");
     } catch (e) {
       setError(e.message || "Failed to connect to backend");
     }
@@ -81,23 +54,6 @@ const Leads = () => {
           onChange={(e) => setPostUrl(e.target.value)}
           style={{ width: "100%", padding: 12, fontSize: 16, marginBottom: 12 }}
         />
-        <div style={{ marginBottom: 12 }}>
-          <label htmlFor="limit" style={{ marginRight: 8, fontWeight: 500 }}>
-            How many usernames?{" "}
-          </label>
-          <select
-            id="limit"
-            value={limit}
-            onChange={(e) => setLimit(Number(e.target.value))}
-            style={{ padding: 8, fontSize: 16, borderRadius: 4 }}
-          >
-            {Array.from({ length: 100 }, (_, i) => i + 1).map((num) => (
-              <option key={num} value={num}>
-                {num}
-              </option>
-            ))}
-          </select>
-        </div>
         <button
           type="submit"
           style={{
@@ -169,15 +125,55 @@ const Leads = () => {
                       color: "#3182ce",
                       cursor: "pointer",
                       fontSize: 14,
+                      marginRight: 8,
                     }}
                   >
                     Copy
+                  </button>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const res = await fetch(
+                          "http://localhost:5000/api/targets",
+                          {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ username }),
+                          }
+                        );
+                        const data = await res.json();
+                        if (data.status === "success") {
+                          alert(`@${username} added to targets!`);
+                        } else {
+                          alert(`Failed to add: ${data.message}`);
+                        }
+                      } catch (e) {
+                        alert("Failed to add target.");
+                      }
+                    }}
+                    style={{
+                      background: "#38a169",
+                      color: "white",
+                      border: "none",
+                      borderRadius: 4,
+                      padding: "4px 10px",
+                      cursor: "pointer",
+                      fontSize: 14,
+                    }}
+                  >
+                    Add to Targets
                   </button>
                 </li>
               ))}
             </ul>
           </div>
-        ) : null}
+        ) : (
+          !loading && (
+            <div style={{ color: "#666", marginTop: 16 }}>
+              No usernames found for this post.
+            </div>
+          )
+        )}
       </div>
     </div>
   );

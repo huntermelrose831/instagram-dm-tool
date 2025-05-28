@@ -255,91 +255,119 @@ app.get("/api/leads", async (req, res) => {
   }
 });
 
-app.post("/api/leads/apify", async (req, res) => {
+app.post("/api/scrape", async (req, res) => {
   const { postUrl, limit } = req.body;
   if (!postUrl)
     return res
       .status(400)
       .json({ status: "error", message: "Missing post URL" });
   try {
-    console.log("Fetching comments for post:", postUrl); // Start the Apify Instagram Scraper actor to get post data with comments
+    console.log("[SCRAPE] Fetching comments for post:", postUrl);
     const run = await apifyClient
       .actor("apify/instagram-comment-scraper")
       .call({
         directUrls: [postUrl],
-        resultsType: "posts",
-        searchLimit: 1,
+        searchLimit: 100,
         resultsLimit: 1,
+        resultsType: "ownerUsername",
         expandOwners: true,
         includeComments: true,
         commentsLimit: 100,
         maxRequestsPerCrawl: 100,
       });
+
     const { items } = await apifyClient
       .dataset(run.defaultDatasetId)
       .listItems();
-    console.log("Received items:", items);
-    if (items.length === 0 || (items[0] && items[0].error === "no_items")) {
-      throw new Error(
-        "Could not fetch post data. Make sure the post exists and is public."
-      );
+    console.log("[SCRAPE] Received response from Apify dataset");
+    console.log("[SCRAPE] Number of items:", items ? items.length : 0);
+    console.log(
+      "[SCRAPE] Raw items structure:",
+      JSON.stringify(items, null, 2)
+    );
+    if (!items || items.length === 0) {
+      return res
+        .status(404)
+        .json({ status: "error", message: "No comments found" });
     }
-    let leads = items
-      .filter((item) => item.comments && Array.isArray(item.comments))
-      .flatMap((item) => {
-        return item.comments
-          .filter((comment) => comment.ownerUsername)
-          .map((comment) => comment.ownerUsername);
-      })
-      // Remove duplicates
-      .filter((username, index, self) => self.indexOf(username) === index);
-    // Apply limit if provided
-    if (limit && Number.isInteger(Number(limit))) {
-      leads = leads.slice(0, Number(limit));
-    }
-    res.json({ status: "success", leads });
+    // Extract all username values from all comments (including duplicates)
+    let allUsernames = [];
+    let debugInfo = [];
+    items.forEach((item, index) => {
+      console.log(`[SCRAPE] Processing item ${index + 1}/${items.length}`);
+      console.log(`[SCRAPE] Item structure:`, JSON.stringify(item, null, 2));
+
+      const debugEntry = {
+        itemIndex: index,
+        fields: {
+          ownerUsername: item.ownerUsername,
+          owner: item.owner ? item.owner.username : undefined,
+        },
+      };
+      debugInfo.push(debugEntry);
+
+      // Each item is a comment, try to get the username
+      if (item.ownerUsername && typeof item.ownerUsername === "string") {
+        console.log(
+          `[SCRAPE] Found username in ownerUsername: ${item.ownerUsername}`
+        );
+        allUsernames.push(item.ownerUsername);
+      } else if (
+        item.owner &&
+        item.owner.username &&
+        typeof item.owner.username === "string"
+      ) {
+        console.log(
+          `[SCRAPE] Found username in owner.username: ${item.owner.username}`
+        );
+        allUsernames.push(item.owner.username);
+      }
+    });
+
+    console.log(
+      "[SCRAPE] Debug info for username fields:",
+      JSON.stringify(debugInfo, null, 2)
+    );
+    console.log("[SCRAPE] All usernames found:", allUsernames);
+
+    // Remove empty/falsey usernames
+    allUsernames = allUsernames.filter(Boolean);
+    console.log("[SCRAPE] Filtered usernames:", allUsernames);
+
+    res.json({
+      status: "success",
+      usernames: allUsernames,
+      debug: debugInfo,
+    });
   } catch (err) {
-    console.error("Apify error:", err);
+    console.error("Scrape error:", err);
     res.status(500).json({ status: "error", message: err.message });
   }
 });
-
+// --- TARGETS API ---
 app.get("/api/targets", (req, res) => {
+  // Return the list of saved usernames (targets)
   const targets = targetsStore.loadTargets();
   res.json({ status: "success", targets });
 });
 
 app.post("/api/targets", (req, res) => {
   const { username } = req.body;
-
-  // Validate username
-  if (!username || typeof username !== "string") {
-    return res.status(400).json({
-      status: "error",
-      message: "Missing or invalid username. Username must be a string.",
-    });
+  if (!username) {
+    return res
+      .status(400)
+      .json({ status: "error", message: "Missing username" });
   }
-
-  try {
-    // Clean username and add to targets
-    const cleanUsername = username.trim();
-    const targets = targetsStore.addTarget(cleanUsername);
-    res.json({ status: "success", targets });
-  } catch (err) {
-    console.error("Error adding target:", err);
-    res.status(500).json({
-      status: "error",
-      message: `Failed to add target: ${err.message}`,
-    });
-  }
+  const targets = targetsStore.addTarget(username);
+  res.json({ status: "success", targets });
 });
 
 app.delete("/api/targets/:username", (req, res) => {
-  const { username } = req.params;
+  const username = req.params.username;
   const targets = targetsStore.removeTarget(username);
   res.json({ status: "success", targets });
 });
 
 app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`Server is running on http://localhost:${PORT}`);
 });
