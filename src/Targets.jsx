@@ -58,7 +58,22 @@ const Targets = () => {
 
   return (
     <div className="p-8 max-w-2xl mx-auto">
-      <h1 className="text-2xl font-bold mb-4">Saved Usernames</h1>
+      <div className="flex justify-between items-center mb-4">
+        <h1 className="text-2xl font-bold">Saved Usernames</h1>
+        {usernames.length > 0 && (
+          <button
+            onClick={() => {
+              const allUsernames = usernames.join("\n");
+              navigator.clipboard.writeText(allUsernames);
+              setSuccess("All usernames copied to clipboard!");
+              setTimeout(() => setSuccess(""), 3000);
+            }}
+            className="bg-blue-500 text-white px-4 py-2 rounded font-semibold hover:bg-blue-600 text-sm"
+          >
+            Copy All Usernames
+          </button>
+        )}
+      </div>
       <form
         className="mb-6 flex gap-2"
         onSubmit={(e) => {

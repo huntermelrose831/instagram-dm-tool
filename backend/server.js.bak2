@@ -1,0 +1,47 @@
+const express = require("express");
+const cors = require("cors");
+const { sendDMs } = require("./sendDMs");
+const accountsStore = require("./accountsStore");
+
+const app = express();
+const PORT = 5000;
+
+app.use(cors());
+app.use(express.json());
+
+// Send DMs endpoint
+app.post("/api/send-dms", async (req, res) => {
+  const { igUsername, usernames, message } = req.body;
+
+  // Validate inputs
+  if (!igUsername || !usernames || !message) {
+    return res.status(400).json({
+      status: "error",
+      message: "Missing required fields",
+    });
+  }
+
+  try {
+    await sendDMs({ igUsername, usernames, message });
+    res.json({
+      status: "success",
+      message: "DMs sent successfully",
+    });
+  } catch (err) {
+    console.error("Error sending DMs:", err);
+    res.status(500).json({
+      status: "error",
+      message: err.message,
+    });
+  }
+});
+
+// Get accounts endpoint
+app.get("/api/accounts", (req, res) => {
+  const accounts = accountsStore.loadAccounts();
+  res.json(accounts.map((acc) => ({ username: acc.username })));
+});
+
+app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+});

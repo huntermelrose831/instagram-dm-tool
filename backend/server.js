@@ -1,13 +1,16 @@
 const express = require("express");
 const cors = require("cors");
-const { scrapeInbox, sendDMs } = require("./sendDMs");
+const { sendDMs } = require("./sendDMs");
 const accountsStore = require("./accountsStore");
 const targetsStore = require("./targetsStore");
+const app = express();
+const PORT = 5000;
 require("dotenv").config();
 const { ApifyClient } = require("apify-client");
 
-const app = express();
-const PORT = 5000;
+// Custom delay function using Promise
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 const apifyClient = new ApifyClient({
   token: process.env.APIFY_TOKEN,
 });
@@ -15,19 +18,24 @@ const apifyClient = new ApifyClient({
 app.use(cors({ origin: "*", credentials: true }));
 app.use(express.json());
 
-// Test route for Puppeteer login
-app.post("/api/send-dm", async (req, res) => {
-  const { username, password, usernames, message } = req.body;
+app.post("/api/send-dms", async (req, res) => {
+  const { username, usernames, message } = req.body;
   try {
+    if (!username) {
+      return res.status(400).json({
+        status: "error",
+        message: "Username is required",
+      });
+    }
+
     await sendDMs({
       igUsername: username,
-      igPassword: password,
       usernames,
       message,
     });
     res.json({
       status: "success",
-      message: "Logged into Instagram (Puppeteer ran)",
+      message: "Messages sent successfully",
     });
   } catch (err) {
     console.error("Puppeteer error:", err);
@@ -89,124 +97,6 @@ app.delete("/api/accounts/:username", (req, res) => {
   res.json({ status: "success" });
 });
 
-app.get("/api/inbox/:username", async (req, res) => {
-  try {
-    const username = req.params.username;
-    console.log("Fetching inbox for:", username);
-
-    // Validate account and cookies first
-    const account = accountsStore.getAccountByUsername(username);
-    if (!account || !account.cookies) {
-      return res.status(401).json({
-        status: "error",
-        message: "Account not found or not logged in. Please log in first.",
-      });
-    }
-
-    // Add timeout to prevent hanging
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error("Inbox fetch timed out")), 300000); // 5 minute timeout
-    });
-
-    const fetchPromise = scrapeInbox(username);
-    const conversations = await Promise.race([fetchPromise, timeoutPromise]);
-
-    console.log(
-      `Found ${conversations ? conversations.length : 0} conversations`
-    );
-
-    if (!conversations || conversations.length === 0) {
-      return res.json({
-        status: "success",
-        conversations: [],
-        message: "No messages found in inbox",
-      });
-    }
-
-    res.json({
-      status: "success",
-      conversations,
-      message: null,
-    });
-  } catch (err) {
-    console.error("Inbox error:", err);
-    res.status(500).json({
-      status: "error",
-      message: err.message,
-      error: true,
-    });
-  }
-});
-
-app.post("/api/reply", async (req, res) => {
-  const { username, threadId, message } = req.body;
-  if (!username || !threadId || !message) {
-    return res.status(400).json({ status: "error", message: "Missing fields" });
-  }
-  try {
-    // Use Puppeteer to send a reply in the given thread
-    const account = accountsStore.getAccountByUsername(username);
-    if (!account || !account.cookies)
-      throw new Error("No cookies for this account");
-    const browser = await puppeteer.launch({
-      headless: false,
-      defaultViewport: null,
-      args: ["--start-maximized"],
-    });
-    const page = await browser.newPage();
-    await page.setCookie(...account.cookies);
-    await page.goto(`https://www.instagram.com${threadId}`, {
-      waitUntil: "networkidle2",
-      timeout: 30000,
-    });
-
-    // Wait for page to be fully loaded
-    await page.waitForTimeout(3000);
-
-    // Try multiple selectors for the DM message input
-    const messageSelectors = [
-      "textarea",
-      'input[aria-label="Message..."]',
-      'div[role="textbox"]',
-    ];
-    let messageBoxFound = false;
-    for (const selector of messageSelectors) {
-      try {
-        await page.waitForSelector(selector, { timeout: 2000 });
-        await page.type(selector, message, { delay: 50 });
-        messageBoxFound = true;
-        break;
-      } catch (e) {}
-    }
-    if (!messageBoxFound) throw new Error("DM message input not found");
-    // Try to click the Send button
-    let sendButtonFound = false;
-    try {
-      await page.waitForSelector('div[role="button"]', { timeout: 5000 });
-      await page.evaluate(() => {
-        const buttons = Array.from(
-          document.querySelectorAll('div[role="button"]')
-        );
-        const sendBtn = buttons.find(
-          (btn) =>
-            btn.innerText && btn.innerText.trim().toLowerCase() === "send"
-        );
-        if (sendBtn) sendBtn.click();
-      });
-      sendButtonFound = true;
-    } catch (e) {}
-    if (!sendButtonFound) {
-      await browser.close();
-      throw new Error("Send button not found");
-    }
-    await browser.close();
-    res.json({ status: "success" });
-  } catch (err) {
-    res.status(500).json({ status: "error", message: err.message });
-  }
-});
-
-const puppeteer = require("puppeteer");
 app.get("/api/leads", async (req, res) => {
   const { account, hashtag } = req.query;
   if (!account || !hashtag) {
@@ -224,7 +114,7 @@ app.get("/api/leads", async (req, res) => {
       `https://www.instagram.com/explore/tags/${encodeURIComponent(hashtag)}/`,
       { waitUntil: "networkidle2", timeout: 30000 }
     );
-    await page.waitForTimeout(3000);
+    await page.waitFor(3000);
     // Scrape post links
     const postLinks = await page.evaluate(() =>
       Array.from(document.querySelectorAll('a[href^="/p/"]')).map((a) =>
@@ -238,7 +128,7 @@ app.get("/api/leads", async (req, res) => {
           waitUntil: "networkidle2",
           timeout: 30000,
         });
-        await page.waitForTimeout(1000);
+        await page.waitFor(1000);
         const username = await page.evaluate(() => {
           const el = document.querySelector('header a[role="link"]');
           return el ? el.textContent : null;
@@ -255,119 +145,104 @@ app.get("/api/leads", async (req, res) => {
   }
 });
 
+// Endpoint to scrape comments from a post
 app.post("/api/scrape", async (req, res) => {
-  const { postUrl, limit } = req.body;
-  if (!postUrl)
-    return res
-      .status(400)
-      .json({ status: "error", message: "Missing post URL" });
   try {
-    console.log("[SCRAPE] Fetching comments for post:", postUrl);
+    const { postUrl } = req.body;
+    console.log("Starting scrape for URL:", postUrl);
+
+    if (!process.env.APIFY_TOKEN) {
+      throw new Error("APIFY_TOKEN is not set in environment variables");
+    } // Run the Instagram scraper actor
+    console.log("Starting Apify actor with Instagram comment scraper...");
+
+    // Prepare Actor input
+    const input = {
+      directUrls: [postUrl],
+      resultsLimit: 20,
+    };
+    console.log("Actor input:", input);
+
+    // Run the Actor and wait for it to finish
     const run = await apifyClient
       .actor("apify/instagram-comment-scraper")
-      .call({
-        directUrls: [postUrl],
-        searchLimit: 100,
-        resultsLimit: 1,
-        resultsType: "ownerUsername",
-        expandOwners: true,
-        includeComments: true,
-        commentsLimit: 100,
-        maxRequestsPerCrawl: 100,
-      });
+      .call(input);
+    console.log("Run completed, dataset ID:", run.defaultDatasetId);
+    console.log(
+      `💾 Results available at: https://console.apify.com/storage/datasets/${run.defaultDatasetId}`
+    );
 
+    // Get the dataset
     const { items } = await apifyClient
       .dataset(run.defaultDatasetId)
       .listItems();
-    console.log("[SCRAPE] Received response from Apify dataset");
-    console.log("[SCRAPE] Number of items:", items ? items.length : 0);
-    console.log(
-      "[SCRAPE] Raw items structure:",
-      JSON.stringify(items, null, 2)
-    );
-    if (!items || items.length === 0) {
-      return res
-        .status(404)
-        .json({ status: "error", message: "No comments found" });
+    console.log("Got items:", JSON.stringify(items, null, 2)); // Process the results
+    console.log("Processing items:", items);
+    let leads = [];
+    if (items && items.length > 0) {
+      leads = items
+        .map((item) => ({
+          username: item.ownerUsername, // Changed to ownerUsername as per Apify's format
+          profileUrl: `https://instagram.com/${item.ownerUsername}`,
+          comment: item.text || "",
+          timestamp: item.timestamp || new Date().toISOString(),
+        }))
+        .filter(
+          (lead, index, self) =>
+            // Remove duplicates
+            index === self.findIndex((l) => l.username === lead.username)
+        )
+        .slice(0, 15); // Limit to 15 results
     }
-    // Extract all username values from all comments (including duplicates)
-    let allUsernames = [];
-    let debugInfo = [];
-    items.forEach((item, index) => {
-      console.log(`[SCRAPE] Processing item ${index + 1}/${items.length}`);
-      console.log(`[SCRAPE] Item structure:`, JSON.stringify(item, null, 2));
 
-      const debugEntry = {
-        itemIndex: index,
-        fields: {
-          ownerUsername: item.ownerUsername,
-          owner: item.owner ? item.owner.username : undefined,
-        },
-      };
-      debugInfo.push(debugEntry);
-
-      // Each item is a comment, try to get the username
-      if (item.ownerUsername && typeof item.ownerUsername === "string") {
-        console.log(
-          `[SCRAPE] Found username in ownerUsername: ${item.ownerUsername}`
-        );
-        allUsernames.push(item.ownerUsername);
-      } else if (
-        item.owner &&
-        item.owner.username &&
-        typeof item.owner.username === "string"
-      ) {
-        console.log(
-          `[SCRAPE] Found username in owner.username: ${item.owner.username}`
-        );
-        allUsernames.push(item.owner.username);
-      }
-    });
-
-    console.log(
-      "[SCRAPE] Debug info for username fields:",
-      JSON.stringify(debugInfo, null, 2)
-    );
-    console.log("[SCRAPE] All usernames found:", allUsernames);
-
-    // Remove empty/falsey usernames
-    allUsernames = allUsernames.filter(Boolean);
-    console.log("[SCRAPE] Filtered usernames:", allUsernames);
-
+    console.log("Processed leads:", leads);
     res.json({
       status: "success",
-      usernames: allUsernames,
-      debug: debugInfo,
+      leads,
     });
+  } catch (error) {
+    console.error("Error scraping leads:", error);
+    res.status(500).json({
+      status: "error",
+      message: error.message || "Failed to scrape leads",
+    });
+  }
+});
+
+// Target usernames endpoints
+app.get("/api/targets", (req, res) => {
+  try {
+    const targets = targetsStore.loadTargets();
+    res.json({ status: "success", targets });
   } catch (err) {
-    console.error("Scrape error:", err);
     res.status(500).json({ status: "error", message: err.message });
   }
 });
-// --- TARGETS API ---
-app.get("/api/targets", (req, res) => {
-  // Return the list of saved usernames (targets)
-  const targets = targetsStore.loadTargets();
-  res.json({ status: "success", targets });
-});
 
 app.post("/api/targets", (req, res) => {
-  const { username } = req.body;
-  if (!username) {
-    return res
-      .status(400)
-      .json({ status: "error", message: "Missing username" });
+  try {
+    const { username } = req.body;
+    if (!username) {
+      return res
+        .status(400)
+        .json({ status: "error", message: "Username is required" });
+    }
+    const targets = targetsStore.addTarget(username);
+    res.json({ status: "success", targets });
+  } catch (err) {
+    res.status(500).json({ status: "error", message: err.message });
   }
-  const targets = targetsStore.addTarget(username);
-  res.json({ status: "success", targets });
 });
 
 app.delete("/api/targets/:username", (req, res) => {
-  const username = req.params.username;
-  const targets = targetsStore.removeTarget(username);
-  res.json({ status: "success", targets });
+  try {
+    const targets = targetsStore.removeTarget(req.params.username);
+    res.json({ status: "success", targets });
+  } catch (err) {
+    res.status(500).json({ status: "error", message: err.message });
+  }
 });
 
 app.listen(PORT, () => {
-  console.log(`Server is running on http://localhost:${PORT}`);
+  console.log(`Server running on http://localhost:${PORT}`);
 });

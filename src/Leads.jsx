@@ -33,146 +33,102 @@ const Leads = () => {
       });
       const data = await res.json();
       if (data.status === "success") {
-        setLeads(Array.isArray(data.usernames) ? data.usernames : []);
-      } else setError(data.message || "Failed to fetch usernames");
+        setLeads(data.leads || []);
+      } else setError(data.message || "Failed to fetch leads");
     } catch (e) {
       setError(e.message || "Failed to connect to backend");
     }
     setLoading(false);
   };
 
+  const copyAllUsernames = () => {
+    const usernames = leads
+      .map((lead) => lead.ownerUsername || lead.username)
+      .join("\n");
+    navigator.clipboard.writeText(usernames);
+  };
+
+  const addToTargets = async () => {
+    for (const lead of leads) {
+      const username = lead.ownerUsername || lead.username;
+      try {
+        await fetch("http://localhost:5000/api/targets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username }),
+        });
+      } catch (err) {
+        console.error(`Failed to add ${username} to targets:`, err);
+      }
+    }
+  };
+
   return (
-    <div style={{ padding: 32, maxWidth: 600, margin: "0 auto" }}>
-      <h2 style={{ fontSize: 28, fontWeight: 700, marginBottom: 24 }}>
-        Instagram Comment Usernames
-      </h2>
-      <form onSubmit={fetchLeads} style={{ marginBottom: 24 }}>
+    <div className="p-8 max-w-4xl mx-auto">
+      <h2 className="text-3xl font-bold mb-6">Instagram Comment Leads</h2>
+      <form onSubmit={fetchLeads} className="mb-6">
         <input
           type="text"
           placeholder="Enter Instagram post URL"
           value={postUrl}
           onChange={(e) => setPostUrl(e.target.value)}
-          style={{ width: "100%", padding: 12, fontSize: 16, marginBottom: 12 }}
+          className="w-full p-3 text-base mb-3 border rounded"
         />
-        <button
-          type="submit"
-          style={{
-            width: "100%",
-            padding: 12,
-            fontSize: 18,
-            background: "#3182ce",
-            color: "white",
-            border: "none",
-            borderRadius: 4,
-            cursor: "pointer",
-            fontWeight: 600,
-          }}
-          disabled={loading}
-        >
-          {loading ? "Analyzing..." : "Get Usernames"}
-        </button>
+        <div className="flex flex-col gap-3">
+          <button
+            type="submit"
+            className="w-full p-3 text-lg bg-blue-600 text-white border-none rounded cursor-pointer font-semibold disabled:opacity-50"
+            disabled={loading}
+          >
+            {loading ? "Analyzing..." : "Get Leads"}
+          </button>
+          {leads.length > 0 && (
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={copyAllUsernames}
+                className="flex-1 p-2 text-sm bg-green-600 text-white border-none rounded cursor-pointer font-semibold"
+              >
+                Copy All Usernames
+              </button>
+              <button
+                type="button"
+                onClick={addToTargets}
+                className="flex-1 p-2 text-sm bg-blue-500 text-white border-none rounded cursor-pointer font-semibold"
+              >
+                Add All to Targets
+              </button>
+            </div>
+          )}
+        </div>
       </form>
-      {error && (
-        <div style={{ color: "#e53e3e", marginBottom: 16 }}>{error}</div>
-      )}
-      <div style={{ overflowX: "auto" }}>
+      {error && <div className="text-red-600 mb-4">{error}</div>}
+      <div className="overflow-x-auto">
         {loading ? (
-          <div style={{ textAlign: "center", padding: 24 }}>
-            <div
-              className="spinner"
-              style={{
-                margin: "0 auto 12px",
-                width: 40,
-                height: 40,
-                border: "4px solid #cbd5e0",
-                borderTop: "4px solid #3182ce",
-                borderRadius: "50%",
-                animation: "spin 1s linear infinite",
-              }}
-            />
-            <div style={{ marginTop: 8 }}>Fetching usernames...</div>
+          <div className="text-center p-6">
+            <div className="spinner mx-auto mb-3 w-10 h-10 border-4 border-gray-300 border-t-blue-600 rounded-full animate-spin" />
+            <div className="mt-2">Fetching leads...</div>
             <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
           </div>
         ) : leads.length > 0 ? (
           <div>
-            <h3 style={{ fontSize: 20, fontWeight: 600, marginBottom: 12 }}>
-              Found {leads.length} Usernames:
+            <h3 className="text-xl font-semibold mb-3">
+              Found {leads.length} Leads:
             </h3>
-            <ul style={{ listStyle: "none", padding: 0 }}>
-              {leads.map((username, index) => (
-                <li
-                  key={index}
-                  style={{
-                    padding: 8,
-                    background: index % 2 === 0 ? "#f7fafc" : "#edf2f7",
-                    borderRadius: 4,
-                    marginBottom: 4,
-                    fontSize: 16,
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                  }}
-                >
-                  <span>@{username}</span>
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(username);
-                      alert(`Copied @${username} to clipboard`);
-                    }}
-                    style={{
-                      background: "none",
-                      border: "none",
-                      color: "#3182ce",
-                      cursor: "pointer",
-                      fontSize: 14,
-                      marginRight: 8,
-                    }}
-                  >
-                    Copy
-                  </button>
-                  <button
-                    onClick={async () => {
-                      try {
-                        const res = await fetch(
-                          "http://localhost:5000/api/targets",
-                          {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ username }),
-                          }
-                        );
-                        const data = await res.json();
-                        if (data.status === "success") {
-                          alert(`@${username} added to targets!`);
-                        } else {
-                          alert(`Failed to add: ${data.message}`);
-                        }
-                      } catch (e) {
-                        alert("Failed to add target.");
-                      }
-                    }}
-                    style={{
-                      background: "#38a169",
-                      color: "white",
-                      border: "none",
-                      borderRadius: 4,
-                      padding: "4px 10px",
-                      cursor: "pointer",
-                      fontSize: 14,
-                    }}
-                  >
-                    Add to Targets
-                  </button>
-                </li>
+            <div className="grid gap-4">
+              {leads.map((lead, i) => (
+                <div key={i} className="p-4 border rounded bg-white shadow-sm">
+                  <div className="text-gray-600">
+                    {lead.ownerUsername || lead.username}
+                  </div>
+                </div>
               ))}
-            </ul>
+            </div>
           </div>
         ) : (
-          !loading && (
-            <div style={{ color: "#666", marginTop: 16 }}>
-              No usernames found for this post.
-            </div>
-          )
+          <div className="text-gray-600 text-center py-6">
+            Enter a post URL above to fetch leads from its comments
+          </div>
         )}
       </div>
     </div>
