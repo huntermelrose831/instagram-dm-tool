@@ -133,5 +133,140 @@
         "sourceScheme": "Secure"
       }
     ]
+  },
+  {
+    "username": "huntermelrose831@yahoo.com",
+    "cookies": [
+      {
+        "name": "sessionid",
+        "value": "75179386930%3AZ3wbmPJafikyJI%3A11%3AAYftaJWGmoobXDB_Zdv6mhTwVpIE63NKqSFKi_ye8w",
+        "domain": ".instagram.com",
+        "path": "/",
+        "expires": 1780528685.377834,
+        "size": 87,
+        "httpOnly": true,
+        "secure": true,
+        "session": false,
+        "priority": "Medium",
+        "sameParty": false,
+        "sourceScheme": "Secure"
+      },
+      {
+        "name": "mid",
+        "value": "aD-CnAALAAEz3QwVx8fkdNnCPnFm",
+        "domain": ".instagram.com",
+        "path": "/",
+        "expires": 1783552669,
+        "size": 31,
+        "httpOnly": false,
+        "secure": true,
+        "session": false,
+        "priority": "Medium",
+        "sameParty": false,
+        "sourceScheme": "Secure"
+      },
+      {
+        "name": "rur",
+        "value": "\"CCO\\05475179386930\\0541780528699:01fe8d7687f59074d0cce54737f521d96b307c75e04712ad5d17e80a61112bb37c811cc3\"",
+        "domain": ".instagram.com",
+        "path": "/",
+        "expires": -1,
+        "size": 110,
+        "httpOnly": true,
+        "secure": true,
+        "session": true,
+        "sameSite": "Lax",
+        "priority": "Medium",
+        "sameParty": false,
+        "sourceScheme": "Secure"
+      },
+      {
+        "name": "ig_nrcb",
+        "value": "1",
+        "domain": ".instagram.com",
+        "path": "/",
+        "expires": 1780528668.585514,
+        "size": 8,
+        "httpOnly": false,
+        "secure": true,
+        "session": false,
+        "priority": "Medium",
+        "sameParty": false,
+        "sourceScheme": "Secure"
+      },
+      {
+        "name": "ig_did",
+        "value": "F0A9F4B4-A8D9-481C-AE38-B176866188FF",
+        "domain": ".instagram.com",
+        "path": "/",
+        "expires": 1780528685.37829,
+        "size": 42,
+        "httpOnly": true,
+        "secure": true,
+        "session": false,
+        "priority": "Medium",
+        "sameParty": false,
+        "sourceScheme": "Secure"
+      },
+      {
+        "name": "datr",
+        "value": "nII_aJPDFA76SYNlwS24Ns5k",
+        "domain": ".instagram.com",
+        "path": "/",
+        "expires": 1783552667.329669,
+        "size": 28,
+        "httpOnly": true,
+        "secure": true,
+        "session": false,
+        "sameSite": "None",
+        "priority": "Medium",
+        "sameParty": false,
+        "sourceScheme": "Secure"
+      },
+      {
+        "name": "ds_user_id",
+        "value": "75179386930",
+        "domain": ".instagram.com",
+        "path": "/",
+        "expires": 1756768699.008722,
+        "size": 21,
+        "httpOnly": false,
+        "secure": true,
+        "session": false,
+        "sameSite": "None",
+        "priority": "Medium",
+        "sameParty": false,
+        "sourceScheme": "Secure"
+      },
+      {
+        "name": "wd",
+        "value": "800x600",
+        "domain": ".instagram.com",
+        "path": "/",
+        "expires": 1749597490,
+        "size": 9,
+        "httpOnly": false,
+        "secure": true,
+        "session": false,
+        "sameSite": "Lax",
+        "priority": "Medium",
+        "sameParty": false,
+        "sourceScheme": "Secure"
+      },
+      {
+        "name": "csrftoken",
+        "value": "UKkxNkuplPksYp1gZOMiBY",
+        "domain": ".instagram.com",
+        "path": "/",
+        "expires": 1783552699.008397,
+        "size": 31,
+        "httpOnly": false,
+        "secure": true,
+        "session": false,
+        "priority": "Medium",
+        "sameParty": false,
+        "sourceScheme": "Secure"
+      }
+    ]
   }
 ]

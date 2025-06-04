@@ -1,7 +1,6 @@
 import { MdSendToMobile } from "react-icons/md";
 import { FaCompass } from "react-icons/fa";
 import { FaRectangleList } from "react-icons/fa6";
-import { FaInbox } from "react-icons/fa";
 import { MdAccountCircle } from "react-icons/md";
 import { RxHome } from "react-icons/rx";
 import { Link } from "react-router-dom";
@@ -32,7 +31,7 @@ const Navbar = () => {
           </Link>
         }
         text="Targets"
-      />
+      />{" "}
       <SideBarIcon
         icon={
           <Link to="/leads">
@@ -40,14 +39,6 @@ const Navbar = () => {
           </Link>
         }
         text="Leads"
-      />
-      <SideBarIcon
-        icon={
-          <Link to="/inbox">
-            <FaInbox size="35" />
-          </Link>
-        }
-        text="Inbox"
       />
       <SideBarIcon
         icon={

@@ -4,7 +4,6 @@ import DMForm from "./DMForm";
 import Home from "./Home";
 import Targets from "./Targets";
 import Leads from "./Leads";
-import Inbox from "./Inbox";
 import Accounts from "./Accounts";
 
 function App() {
@@ -18,7 +17,6 @@ function App() {
             <Route path="/send-dm" element={<DMForm />} />
             <Route path="/targets" element={<Targets />} />
             <Route path="/leads" element={<Leads />} />
-            <Route path="/inbox" element={<Inbox />} />
             <Route path="/accounts" element={<Accounts />} />
           </Routes>
         </main>
