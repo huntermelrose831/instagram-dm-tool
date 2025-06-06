@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const { sendDMs } = require("./sendDMs");
+const { sendDMsViaApify } = require('./sendDMsApify');
 const accountsStore = require("./accountsStore");
 const targetsStore = require("./targetsStore");
 const app = express();
@@ -19,33 +20,65 @@ app.use(cors({ origin: "*", credentials: true }));
 app.use(express.json());
 
 app.post("/api/send-dms", async (req, res) => {
-  const { username, usernames, message } = req.body;
+  const { username, usernames, message, useApify } = req.body;
+
   try {
-    if (!username) {
+    if (!username || !usernames || !message) {
       return res.status(400).json({
         status: "error",
-        message: "Username is required",
+        message: "Missing required fields: username, usernames, or message",
       });
     }
 
-    await sendDMs({
-      igUsername: username,
-      usernames,
-      message,
+    if (useApify) {
+  const account = accountsStore.getAccountByUsername(username);
+  const sessionCookie = account?.cookies?.find(c => c.name === 'sessionid');
+
+  if (!sessionCookie) {
+    return res.status(400).json({
+      status: 'error',
+      message: 'Session ID not found for selected account'
     });
-    res.json({
-      status: "success",
-      message: "Messages sent successfully",
-    });
+  }
+  console.log(req.body);
+
+console.log('Received usernames:', usernames);
+console.log('Type of usernames:', typeof usernames);
+  await sendDMsViaApify({
+    sessionId: sessionCookie.value,
+    
+
+    usernames: usernames,
+    message,
+    delayBetweenMessages: 60
+  });
+
+      return res.json({
+        status: "success",
+        message: "Messages sent successfully via Apify",
+      });
+    } else {
+      await sendDMs({
+        igUsername: username,
+        usernames,
+        message,
+      });
+
+      return res.json({
+        status: "success",
+        message: "Messages sent successfully via Puppeteer",
+      });
+    }
   } catch (err) {
-    console.error("Puppeteer error:", err);
+    console.error("DM sending error:", err);
     res.status(500).json({
       status: "error",
-      message: "Failed to log in to Instagram",
+      message: "Failed to send DMs",
       error: err.message,
     });
   }
 });
+
 
 app.post("/api/add-account", async (req, res) => {
   const { username, password } = req.body;

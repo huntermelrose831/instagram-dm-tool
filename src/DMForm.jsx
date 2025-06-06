@@ -6,6 +6,8 @@ const DMForm = () => {
   const [targets, setTargets] = useState("");
   const [message, setMessage] = useState("");
   const [status, setStatus] = useState("");
+  const [useApify, setUseApify] = useState(false);
+
 
   useEffect(() => {
     fetch("http://localhost:5000/api/accounts")
@@ -25,10 +27,14 @@ const DMForm = () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          username: selected,
-          usernames: targets,
-          message,
-        }),
+        username: selected,
+        usernames: targets
+          .split("\n")
+          .map((u) => u.trim())
+          .filter((u) => u !== ""),
+        message,
+        useApify,
+      }),
       });
       const data = await response.json();
       setStatus(data.message || "Success!");
@@ -82,6 +88,21 @@ const DMForm = () => {
           required
         />
       </div>
+      <div className="mb-3">
+    <label className="inline-flex items-center">
+      <input
+      type="checkbox"
+      className="mr-2"
+      checked={useApify}
+      onChange={(e) => setUseApify(e.target.checked)}
+     />
+    Use Apify to send DMs
+   </label>
+      </div>
+          <p className="text-sm text-gray-600 mb-3">
+  Method: {useApify ? "Apify (Cloud)" : "Puppeteer (Local Bot)"}
+          </p>
+
       <button
         type="submit"
         className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
