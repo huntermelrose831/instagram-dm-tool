@@ -41,7 +41,7 @@ async function sendDMs({ igUsername, usernames, message }) {
   const account = accountsStore.getAccountByUsername(igUsername);
   if (!account?.cookies) throw new Error("No cookies found for this account. Please log in first.");
 
-  const browser = await puppeteer.launch({ headless: false, defaultViewport: null, args: ["--start-maximized"] });
+  const browser = await puppeteer.launch({ headless: true, defaultViewport: null, args: ["--start-maximized"] });
   const page = await browser.newPage();
 
   try {
@@ -49,13 +49,7 @@ async function sendDMs({ igUsername, usernames, message }) {
     await page.setCookie(...account.cookies);
     await page.goto("https://www.instagram.com/direct/new", { waitUntil: "networkidle2" });
 
-    const notNowBtn = await waitForAnySelector(page, SELECTORS.NOT_NOW_BUTTON, 5000).catch(() => null);
-    if (notNowBtn) await notNowBtn.click();
-
-    const newMessageButton = await waitForAnySelector(page, SELECTORS.NEWMESSAGEBUTTON);
-    await newMessageButton.click();
-
-    let searchBox = await waitForAnySelector(page, SELECTORS.SEARCH_BOX);
+    
 
     const targetsArray = Array.isArray(usernames)
       ? usernames
@@ -68,6 +62,14 @@ async function sendDMs({ igUsername, usernames, message }) {
       while (retryCount <= MAX_RETRIES && !success) {
         try {
           console.log(`Starting DM to ${target}`);
+          const notNowBtn = await waitForAnySelector(page, SELECTORS.NOT_NOW_BUTTON, 5000).catch(() => null);
+          if (notNowBtn) await notNowBtn.click();
+
+          const newMessageButton = await waitForAnySelector(page, SELECTORS.NEWMESSAGEBUTTON);
+          await newMessageButton.click();
+
+          let searchBox = await waitForAnySelector(page, SELECTORS.SEARCH_BOX);    
+
           await searchBox.click({ clickCount: 3 });
           await page.keyboard.press("Backspace");
           await delay(500);
@@ -78,7 +80,7 @@ async function sendDMs({ igUsername, usernames, message }) {
           await results.click();
 
           const chatButtons = await page.$$('div[role="button"]');
-          for (const btn of chatButtons) {
+          for (const btn of chatButtons) { 
             try {
               const text = await btn.evaluate(el => el?.innerText?.trim());
               if (text === "Chat") {
@@ -105,10 +107,7 @@ async function sendDMs({ igUsername, usernames, message }) {
           messagesSent++;
           success = true;
 
-          await delay(2000);
-          await page.click(SELECTORS.NEWMESSAGEBUTTON);
-          await delay(DELAYS.ACTION_DELAY);
-          searchBox = await waitForAnySelector(page, SELECTORS.SEARCH_BOX);
+          
         } catch (error) {
           console.error(`Error with ${target}: ${error.message}`);
           const screenshotPath = `error_${target}.png`;
