@@ -1,7 +1,8 @@
 const express = require("express");
 const cors = require("cors");
 const { sendDMs } = require("./sendDMs");
-const { sendDMsViaApify } = require('./sendDMsApify');
+const puppeteer = require("puppeteer");
+
 const accountsStore = require("./accountsStore");
 const targetsStore = require("./targetsStore");
 const app = express();
@@ -31,27 +32,21 @@ app.post("/api/send-dms", async (req, res) => {
     }
 
     if (useApify) {
-  const account = accountsStore.getAccountByUsername(username);
-  const sessionCookie = account?.cookies?.find(c => c.name === 'sessionid');
+      const account = accountsStore.getAccountByUsername(username);
+      const sessionCookie = account?.cookies?.find(
+        (c) => c.name === "sessionid"
+      );
 
-  if (!sessionCookie) {
-    return res.status(400).json({
-      status: 'error',
-      message: 'Session ID not found for selected account'
-    });
-  }
-  console.log(req.body);
+      if (!sessionCookie) {
+        return res.status(400).json({
+          status: "error",
+          message: "Session ID not found for selected account",
+        });
+      }
+      console.log(req.body);
 
-console.log('Received usernames:', usernames);
-console.log('Type of usernames:', typeof usernames);
-  await sendDMsViaApify({
-    sessionId: sessionCookie.value,
-    
-
-    usernames: usernames,
-    message,
-    delayBetweenMessages: 60
-  });
+      console.log("Received usernames:", usernames);
+      console.log("Type of usernames:", typeof usernames);
 
       return res.json({
         status: "success",
@@ -78,7 +73,6 @@ console.log('Type of usernames:', typeof usernames);
     });
   }
 });
-
 
 app.post("/api/add-account", async (req, res) => {
   const { username, password } = req.body;
@@ -130,56 +124,103 @@ app.delete("/api/accounts/:username", (req, res) => {
   res.json({ status: "success" });
 });
 
-app.get("/api/leads", async (req, res) => {
-  const { account, hashtag } = req.query;
-  if (!account || !hashtag) {
-    return res
-      .status(400)
-      .json({ status: "error", message: "Missing account or hashtag" });
-  }
+app.post("/api/scrape/accounts", async (req, res) => {
+  const { postUrl } = req.body;
+  console.log("Starting scrape for account URL:", postUrl);
+
   try {
-    const acc = accountsStore.getAccountByUsername(account);
-    if (!acc || !acc.cookies) throw new Error("No cookies for this account");
-    const browser = await puppeteer.launch({ headless: true });
-    const page = await browser.newPage();
-    await page.setCookie(...acc.cookies);
-    await page.goto(
-      `https://www.instagram.com/explore/tags/${encodeURIComponent(hashtag)}/`,
-      { waitUntil: "networkidle2", timeout: 30000 }
-    );
-    await page.waitFor(3000);
-    // Scrape post links
-    const postLinks = await page.evaluate(() =>
-      Array.from(document.querySelectorAll('a[href^="/p/"]')).map((a) =>
-        a.getAttribute("href")
-      )
-    );
-    const leads = [];
-    for (const link of postLinks.slice(0, 15)) {
-      try {
-        await page.goto(`https://www.instagram.com${link}`, {
-          waitUntil: "networkidle2",
-          timeout: 30000,
-        });
-        await page.waitFor(1000);
-        const username = await page.evaluate(() => {
-          const el = document.querySelector('header a[role="link"]');
-          return el ? el.textContent : null;
-        });
-        if (username && !leads.find((l) => l.username === username)) {
-          leads.push({ username });
-        }
-      } catch (e) {}
+    const usernameMatch = postUrl.match(/instagram\.com\/([^\/\?]+)/);
+    if (!usernameMatch) throw new Error("Invalid profile URL");
+
+    const username = usernameMatch[1];
+
+    // Get saved cookies for authentication
+    const account = accountsStore.loadAccounts()[0]; // Use first available account
+    if (!account || !account.cookies) {
+      throw new Error(
+        "No authenticated Instagram account found. Please add an account first."
+      );
     }
+
+    const browser = await puppeteer.launch({ headless: false });
+    const page = await browser.newPage();
+
+    // Set the saved cookies
+    await page.setCookie(...account.cookies);
+    await page.goto(`https://www.instagram.com/${username}/`, {
+      waitUntil: "networkidle2",
+    });
+
+    // Wait for the followers count to be visible
+    await page.waitForSelector('a[href$="/followers/"]', { timeout: 5000 });
+
+    // Click the followers link and wait for modal
+    await page.click('a[href$="/followers/"]');
+    await page.waitForSelector('div[role="dialog"]', { timeout: 5000 });
+    await page.waitForTimeout(2000); // Give some time for followers to load
+
+    const followers = new Set();
+
+    // Keep retrying until we find the modal
+    const modal = await page.waitForSelector(
+      'div[role="dialog"] div > div > div:nth-child(2)',
+      {
+        timeout: 5000,
+      }
+    );
+
+    if (!modal) {
+      throw new Error("Could not find followers modal");
+    }
+
+    let lastHeight = 0;
+
+    while (followers.size < 30) {
+      // Wait for items to load
+      await page.waitForSelector('div[role="dialog"] a[href^="/"]', {
+        timeout: 5000,
+      });
+
+      const newFollowers = await page.evaluate(() => {
+        const anchors = Array.from(
+          document.querySelectorAll('div[role="dialog"] a[href^="/"]')
+        );
+        return anchors.map((a) => a.getAttribute("href").replace(/\//g, ""));
+      });
+
+      newFollowers.forEach((f) => followers.add(f));
+
+      await page.evaluate((el) => {
+        el.scrollTop = el.scrollHeight;
+      }, modal);
+
+      await page.waitForTimeout(2000);
+
+      const currentHeight = await page.evaluate((el) => el.scrollHeight, modal);
+      if (currentHeight === lastHeight) break;
+      lastHeight = currentHeight;
+    }
+
     await browser.close();
+
+    const leads = Array.from(followers)
+      .slice(0, 15)
+      .map((username) => ({
+        username,
+        profileUrl: `https://instagram.com/${username}`,
+        timestamp: new Date().toISOString(),
+      }));
+
+    console.log("Processed leads:", leads);
     res.json({ status: "success", leads });
   } catch (err) {
+    console.error("Error scraping leads:", err);
     res.status(500).json({ status: "error", message: err.message });
   }
 });
 
 // Endpoint to scrape comments from a post
-app.post("/api/scrape", async (req, res) => {
+app.post("/api/scrape/posts", async (req, res) => {
   try {
     const { postUrl } = req.body;
     console.log("Starting scrape for URL:", postUrl);
@@ -241,7 +282,68 @@ app.post("/api/scrape", async (req, res) => {
     });
   }
 });
+// Endpoint to scrape comments from a hashtag
+app.post("/api/scrape/hashtags", async (req, res) => {
+  try {
+    const { postUrl } = req.body;
+    console.log("Starting scrape for URL:", postUrl);
 
+    if (!process.env.APIFY_TOKEN) {
+      throw new Error("APIFY_TOKEN is not set in environment variables");
+    }
+
+    // Extract hashtag from URL or direct input
+    const hashtag = postUrl.replace(/^#/, "").trim();
+
+    // Prepare Actor input
+    const input = {
+      hashtags: [hashtag],
+      resultsLimit: 20,
+    };
+    console.log("Actor input:", input);
+
+    // Run the Actor and wait for it to finish
+    const run = await apifyClient
+      .actor("apify/instagram-hashtag-scraper")
+      .call(input);
+    console.log("Run completed, dataset ID:", run.defaultDatasetId);
+
+    // Get the dataset
+    const { items } = await apifyClient
+      .dataset(run.defaultDatasetId)
+      .listItems();
+
+    let leads = [];
+    if (items && items.length > 0) {
+      // Extract usernames from posts
+      leads = items
+        .map((item) => ({
+          username: item.ownerUsername,
+          profileUrl: `https://instagram.com/${item.ownerUsername}`,
+          timestamp: item.timestamp || new Date().toISOString(),
+        }))
+        .filter((lead) => lead.username) // Remove any undefined usernames
+        .filter(
+          (lead, index, self) =>
+            // Remove duplicates
+            index === self.findIndex((l) => l.username === lead.username)
+        )
+        .slice(0, 15); // Limit to 15 results
+    }
+
+    console.log("Processed leads:", leads);
+    res.json({
+      status: "success",
+      leads,
+    });
+  } catch (error) {
+    console.error("Error scraping leads:", error);
+    res.status(500).json({
+      status: "error",
+      message: error.message || "Failed to scrape leads",
+    });
+  }
+});
 // Target usernames endpoints
 app.get("/api/targets", (req, res) => {
   try {
