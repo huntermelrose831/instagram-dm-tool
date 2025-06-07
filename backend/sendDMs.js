@@ -19,7 +19,9 @@ async function waitForAnySelector(page, selectors, timeout = 10000) {
       // Try next selector
     }
   }
-  throw new Error(`None of the selectors matched: ${JSON.stringify(selectors)}`);
+  throw new Error(
+    `None of the selectors matched: ${JSON.stringify(selectors)}`
+  );
 }
 
 const DELAYS = {
@@ -29,7 +31,8 @@ const DELAYS = {
   ACTION_DELAY: 2000,
 };
 
-const getRandomDelay = (min, max) => Math.floor(Math.random() * (max - min + 1) + min);
+const getRandomDelay = (min, max) =>
+  Math.floor(Math.random() * (max - min + 1) + min);
 const MAX_RETRIES = 2;
 const MAX_RATE_LIMIT_RETRIES = 3;
 
@@ -39,21 +42,29 @@ async function sendDMs({ igUsername, usernames, message }) {
   let rateLimitHits = 0;
 
   const account = accountsStore.getAccountByUsername(igUsername);
-  if (!account?.cookies) throw new Error("No cookies found for this account. Please log in first.");
+  if (!account?.cookies)
+    throw new Error("No cookies found for this account. Please log in first.");
 
-  const browser = await puppeteer.launch({ headless: true, defaultViewport: null, args: ["--start-maximized"] });
+  const browser = await puppeteer.launch({
+    headless: true,
+    defaultViewport: null,
+    args: ["--start-maximized"],
+  });
   const page = await browser.newPage();
 
   try {
     await page.setDefaultNavigationTimeout(60000);
     await page.setCookie(...account.cookies);
-    await page.goto("https://www.instagram.com/direct/new", { waitUntil: "networkidle2" });
-
-    
+    await page.goto("https://www.instagram.com/direct/new", {
+      waitUntil: "networkidle2",
+    });
 
     const targetsArray = Array.isArray(usernames)
       ? usernames
-      : usernames.split(/[\n,;]+/).map((t) => t.trim()).filter(Boolean);
+      : usernames
+          .split(/[\n,;]+/)
+          .map((t) => t.trim())
+          .filter(Boolean);
 
     for (const target of targetsArray) {
       let retryCount = 0;
@@ -62,27 +73,39 @@ async function sendDMs({ igUsername, usernames, message }) {
       while (retryCount <= MAX_RETRIES && !success) {
         try {
           console.log(`Starting DM to ${target}`);
-          const notNowBtn = await waitForAnySelector(page, SELECTORS.NOT_NOW_BUTTON, 5000).catch(() => null);
+          const notNowBtn = await waitForAnySelector(
+            page,
+            SELECTORS.NOT_NOW_BUTTON,
+            5000
+          ).catch(() => null);
           if (notNowBtn) await notNowBtn.click();
 
-          const newMessageButton = await waitForAnySelector(page, SELECTORS.NEWMESSAGEBUTTON);
+          const newMessageButton = await waitForAnySelector(
+            page,
+            SELECTORS.NEWMESSAGEBUTTON
+          );
           await newMessageButton.click();
 
-          let searchBox = await waitForAnySelector(page, SELECTORS.SEARCH_BOX);    
+          let searchBox = await waitForAnySelector(page, SELECTORS.SEARCH_BOX);
 
           await searchBox.click({ clickCount: 3 });
           await page.keyboard.press("Backspace");
           await delay(500);
-          await searchBox.type(target, { delay: getRandomDelay(DELAYS.TYPING.min, DELAYS.TYPING.max) });
+          await searchBox.type(target, {
+            delay: getRandomDelay(DELAYS.TYPING.min, DELAYS.TYPING.max),
+          });
           await delay(1500);
 
-          const results = await waitForAnySelector(page, SELECTORS.SEARCH_RESULTS);
+          const results = await waitForAnySelector(
+            page,
+            SELECTORS.SEARCH_RESULTS
+          );
           await results.click();
 
           const chatButtons = await page.$$('div[role="button"]');
-          for (const btn of chatButtons) { 
+          for (const btn of chatButtons) {
             try {
-              const text = await btn.evaluate(el => el?.innerText?.trim());
+              const text = await btn.evaluate((el) => el?.innerText?.trim());
               if (text === "Chat") {
                 await btn.click();
                 break;
@@ -92,22 +115,17 @@ async function sendDMs({ igUsername, usernames, message }) {
             }
           }
 
-          const messageBox = await waitForAnySelector(page, SELECTORS.MESSAGE_BOX);
+          const messageBox = await waitForAnySelector(
+            page,
+            SELECTORS.MESSAGE_BOX
+          );
           await messageBox.type(message);
           await page.keyboard.press("Enter"); // Press the Enter key to send
-// Converts a given XPath to a Puppeteer-compatible selector usage
-
-
-
-
-
-          
+          // Converts a given XPath to a Puppeteer-compatible selector usage
 
           console.log(`Message sent to ${target}`);
           messagesSent++;
           success = true;
-
-          
         } catch (error) {
           console.error(`Error with ${target}: ${error.message}`);
           const screenshotPath = `error_${target}.png`;
@@ -115,7 +133,8 @@ async function sendDMs({ igUsername, usernames, message }) {
 
           if (/rate|spam|limit/i.test(error.message)) {
             rateLimitHits++;
-            if (rateLimitHits >= MAX_RATE_LIMIT_RETRIES) await delay(DELAYS.RATE_LIMIT_PAUSE * 2);
+            if (rateLimitHits >= MAX_RATE_LIMIT_RETRIES)
+              await delay(DELAYS.RATE_LIMIT_PAUSE * 2);
             break;
           }
 
@@ -124,7 +143,10 @@ async function sendDMs({ igUsername, usernames, message }) {
         }
       }
 
-      const pause = getRandomDelay(DELAYS.BETWEEN_MESSAGES.min, DELAYS.BETWEEN_MESSAGES.max);
+      const pause = getRandomDelay(
+        DELAYS.BETWEEN_MESSAGES.min,
+        DELAYS.BETWEEN_MESSAGES.max
+      );
       console.log(`Waiting ${pause / 1000}s before next DM...`);
       await delay(pause);
     }
