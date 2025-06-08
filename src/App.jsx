@@ -5,6 +5,9 @@ import Home from "./Home";
 import Targets from "./Targets";
 import Leads from "./Leads";
 import Accounts from "./Accounts";
+import ScheduleDM from "./ScheduleDM";
+import Campaigns from "./Campaigns";
+import CRM from "./CRM";
 
 function App() {
   return (
@@ -15,9 +18,12 @@ function App() {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/send-dm" element={<DMForm />} />
+            <Route path="/schedule-dm" element={<ScheduleDM />} />
             <Route path="/targets" element={<Targets />} />
             <Route path="/leads" element={<Leads />} />
             <Route path="/accounts" element={<Accounts />} />
+            <Route path="/campaigns" element={<Campaigns />} />
+            <Route path="/crm" element={<CRM />} />
           </Routes>
         </main>
       </div>

@@ -5,6 +5,7 @@ const StealthPlugin = require("puppeteer-extra-plugin-stealth");
 const accountsStore = require("./accountsStore");
 const { delay } = require("./utils/delay");
 const { SELECTORS } = require("./utils/selectors");
+const { createContact, recordInteraction } = require("./database/crm");
 
 puppeteer.use(StealthPlugin());
 
@@ -36,10 +37,32 @@ const getRandomDelay = (min, max) =>
 const MAX_RETRIES = 2;
 const MAX_RATE_LIMIT_RETRIES = 3;
 
-async function sendDMs({ igUsername, usernames, message }) {
+async function sendDMs({
+  igUsername,
+  usernames,
+  message,
+  campaignId = null,
+  messageVariations = null,
+}) {
   console.log(`Starting DM session for account: ${igUsername}`);
   let messagesSent = 0;
+  let responseCount = 0;
   let rateLimitHits = 0;
+  let variationStats = messageVariations
+    ? messageVariations.map((v) => ({
+        sent: 0,
+        responses: 0,
+      }))
+    : [];
+
+  // Campaign message variation handling
+  let selectedVariationIndex = -1;
+  if (messageVariations && messageVariations.length > 0) {
+    selectedVariationIndex = Math.floor(
+      Math.random() * messageVariations.length
+    );
+    message = messageVariations[selectedVariationIndex];
+  }
 
   const account = accountsStore.getAccountByUsername(igUsername);
   if (!account?.cookies)
@@ -69,6 +92,9 @@ async function sendDMs({ igUsername, usernames, message }) {
     for (const target of targetsArray) {
       let retryCount = 0;
       let success = false;
+
+      // Create or update contact in CRM
+      const contact = createContact(target);
 
       while (retryCount <= MAX_RETRIES && !success) {
         try {
@@ -121,10 +147,27 @@ async function sendDMs({ igUsername, usernames, message }) {
           );
           await messageBox.type(message);
           await page.keyboard.press("Enter"); // Press the Enter key to send
-          // Converts a given XPath to a Puppeteer-compatible selector usage
 
           console.log(`Message sent to ${target}`);
           messagesSent++;
+          if (selectedVariationIndex !== -1) {
+            variationStats[selectedVariationIndex].sent++;
+          }
+
+          // Record message sent in CRM
+          recordInteraction(contact.id, "dm_sent", message, campaignId);
+
+          // Check for response
+          const hasResponse = await checkForResponse(page, target);
+          if (hasResponse) {
+            responseCount++;
+            if (selectedVariationIndex !== -1) {
+              variationStats[selectedVariationIndex].responses++;
+            }
+            // Record response in CRM
+            recordInteraction(contact.id, "dm_received", "Received response");
+          }
+
           success = true;
         } catch (error) {
           console.error(`Error with ${target}: ${error.message}`);
@@ -150,12 +193,53 @@ async function sendDMs({ igUsername, usernames, message }) {
       console.log(`Waiting ${pause / 1000}s before next DM...`);
       await delay(pause);
     }
-
     console.log(`Session complete: ${messagesSent} DMs sent.`);
-  } catch (err) {
-    console.error("sendDMs critical error:", err);
+
+    // Update campaign stats if this is part of a campaign
+    if (campaignId) {
+      try {
+        await updateCampaignStats(campaignId, { success_count: messagesSent });
+        console.log(
+          `Updated campaign ${campaignId} stats: ${messagesSent} messages sent`
+        );
+      } catch (statsError) {
+        console.error("Failed to update campaign stats:", statsError);
+      }
+    }
+
+    return {
+      successCount: messagesSent,
+      responseCount,
+      variationStats,
+      rateLimitHits,
+    };
+  } catch (error) {
+    console.error("Error in sendDMs:", error);
+    throw error;
   } finally {
     await browser.close();
+  }
+}
+
+async function checkForResponse(page, username) {
+  try {
+    // Navigate to the conversation
+    await page.goto(`https://www.instagram.com/direct/t/${username}`, {
+      waitUntil: "networkidle2",
+    });
+
+    // Wait for messages to load
+    await delay(2000);
+
+    // Check for messages from the other user
+    const theirMessages = await page.$$eval(
+      ".message-from-them",
+      (msgs) => msgs.length
+    );
+    return theirMessages > 0;
+  } catch (error) {
+    console.error("Error checking for response:", error);
+    return false;
   }
 }
 

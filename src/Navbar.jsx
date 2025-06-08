@@ -3,6 +3,8 @@ import { FaCompass } from "react-icons/fa";
 import { FaRectangleList } from "react-icons/fa6";
 import { MdAccountCircle } from "react-icons/md";
 import { RxHome } from "react-icons/rx";
+import { MdCampaign } from "react-icons/md";
+import { FaUserFriends } from "react-icons/fa"; // Add CRM icon
 import { Link } from "react-router-dom";
 
 const Navbar = () => {
@@ -47,6 +49,22 @@ const Navbar = () => {
           </Link>
         }
         text="Accounts"
+      />
+      <SideBarIcon
+        icon={
+          <Link to="/campaigns">
+            <MdCampaign size="35" />
+          </Link>
+        }
+        text="Campaigns"
+      />
+      <SideBarIcon
+        icon={
+          <Link to="/crm">
+            <FaUserFriends size="35" />
+          </Link>
+        }
+        text="CRM"
       />
     </div>
   );

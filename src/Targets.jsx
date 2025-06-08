@@ -1,16 +1,32 @@
 import React, { useState, useEffect } from "react";
 
 const Targets = () => {
-  const [usernames, setUsernames] = useState([]);
+  const [usernames, setUsernames] = useState(() => {
+    // Initialize from localStorage if available
+    const saved = localStorage.getItem("savedTargets");
+    return saved ? JSON.parse(saved) : [];
+  });
   const [newUsername, setNewUsername] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  // Load saved usernames from backend
+  // Save to localStorage whenever usernames change
+  useEffect(() => {
+    localStorage.setItem("savedTargets", JSON.stringify(usernames));
+  }, [usernames]);
+
+  // Load saved usernames from backend and merge with localStorage
   useEffect(() => {
     fetch("http://localhost:5000/api/targets")
       .then((r) => r.json())
-      .then((data) => setUsernames(data.targets || []));
+      .then((data) => {
+        const backendTargets = data.targets || [];
+        // Merge backend targets with local targets, removing duplicates
+        setUsernames((prev) => {
+          const combined = [...new Set([...prev, ...backendTargets])];
+          return combined;
+        });
+      });
   }, []);
 
   // Add a new username
@@ -96,17 +112,24 @@ const Targets = () => {
         </button>
       </form>
       {success && <div className="text-green-600 mb-2">{success}</div>}
-      {error && <div className="text-red-600 mb-2">{error}</div>}
+      {error && <div className="text-red-600 mb-2">{error}</div>}{" "}
       <div className="overflow-x-auto">
+        {" "}
         <table className="min-w-full bg-white rounded shadow">
           <thead>
-            <tr>
-              <th className="py-2 px-4 border-b text-left">Username</th>
-              <th className="py-2 px-4 border-b text-left">Profile</th>
-              <th className="py-2 px-4 border-b text-left">Actions</th>
+            <tr className="bg-gray-50 border-b">
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Username
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Profile
+              </th>
+              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Actions
+              </th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="divide-y divide-gray-200">
             {usernames.length === 0 && (
               <tr>
                 <td colSpan={3} className="text-gray-500 py-4 text-center">
@@ -114,12 +137,14 @@ const Targets = () => {
                 </td>
               </tr>
             )}
-            {usernames.map((u, i) => (
-              <tr key={i}>
-                <td className="py-2 px-4 border-b">{u}</td>
-                <td className="py-2 px-4 border-b">
+            {usernames.map((username) => (
+              <tr key={username} className="hover:bg-gray-50">
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                  {username}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                   <a
-                    href={`https://instagram.com/${u}`}
+                    href={`https://instagram.com/${username}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-blue-600 hover:underline"
@@ -127,10 +152,20 @@ const Targets = () => {
                     View Profile
                   </a>
                 </td>
-                <td className="py-2 px-4 border-b">
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">
                   <button
-                    className="text-red-600 hover:underline"
-                    onClick={() => removeUsername(u)}
+                    onClick={() => {
+                      navigator.clipboard.writeText(username);
+                      setSuccess(`Username "${username}" copied to clipboard!`);
+                      setTimeout(() => setSuccess(""), 3000);
+                    }}
+                    className="text-blue-600 hover:text-blue-800 mr-4"
+                  >
+                    Copy
+                  </button>
+                  <button
+                    onClick={() => removeUsername(username)}
+                    className="text-red-600 hover:text-red-800"
                   >
                     Remove
                   </button>

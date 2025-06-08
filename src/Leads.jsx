@@ -8,6 +8,8 @@ const Leads = () => {
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [addedLeads, setAddedLeads] = useState(new Set());
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -21,35 +23,31 @@ const Leads = () => {
     setLoading(true);
     setError("");
     setLeads([]);
+    setAddedLeads(new Set()); // Reset added leads when fetching new ones
     try {
       // Different validation for different modes
       if (selected === "posts") {
         if (
           !postUrl.match(/^https?:\/\/(www\.)?instagram\.com\/p\/[\w-]+\/?/)
         ) {
-          throw new Error(
-            "Please enter a valid Instagram post URL (e.g., https://instagram.com/p/ABC123)"
-          );
+          throw new Error("Please enter a valid Instagram post URL");
         }
       } else if (selected === "accounts") {
         if (
           !postUrl.match(/^https?:\/\/(www\.)?instagram\.com\/([^\/\?]+)\/?$/)
         ) {
-          throw new Error(
-            "Please enter a valid Instagram profile URL (e.g., https://instagram.com/username)"
-          );
+          throw new Error("Please enter a valid Instagram profile URL");
         }
       } else if (selected === "hashtags") {
-        // For hashtags, allow simple hashtag input
-        const hashtag = postUrl.replace(/^#/, "").trim();
-        if (!hashtag) {
-          throw new Error("Please enter a hashtag (e.g., programming)");
+        if (!postUrl.trim()) {
+          throw new Error("Please enter a hashtag");
         }
-        // Convert hashtag to Instagram URL format
-        setPostUrl(`https://www.instagram.com/explore/tags/${hashtag}/`);
+      } else if (selected === "keywords") {
+        if (!postUrl.trim()) {
+          throw new Error("Please enter keywords to search");
+        }
       }
 
-      // Use different endpoint based on selected mode
       const endpoint = selected;
       const res = await fetch(`http://localhost:5000/api/scrape/${endpoint}`, {
         method: "POST",
@@ -74,16 +72,30 @@ const Leads = () => {
   };
 
   const addToTargets = async () => {
-    for (const lead of leads) {
-      try {
-        await fetch("http://localhost:5000/api/targets", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username: lead.username }),
-        });
-      } catch (err) {
-        console.error(`Failed to add ${lead.username} to targets:`, err);
+    setSuccess("");
+    setError("");
+    let addedCount = 0;
+    try {
+      for (const lead of leads) {
+        try {
+          const res = await fetch("http://localhost:5000/api/targets", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username: lead.username }),
+          });
+          const data = await res.json();
+          if (data.status === "success") {
+            setAddedLeads((prev) => new Set([...prev, lead.username]));
+            addedCount++;
+          }
+        } catch (err) {
+          console.error(`Failed to add ${lead.username} to targets:`, err);
+        }
       }
+      setSuccess(`Successfully added ${addedCount} leads to targets!`);
+      setTimeout(() => setSuccess(""), 3000);
+    } catch (err) {
+      setError("Failed to add some leads to targets");
     }
   };
 
@@ -169,8 +181,30 @@ const Leads = () => {
           </div>
           <span className="text-sm font-semibold">HASHTAGS</span>
         </button>
-        <button className="p-6 border rounded shadow-sm text-center">
-          &nbsp;
+
+        <button
+          className={`cursor-pointer p-6 border rounded shadow-sm text-center hover:bg-gray-100 ${
+            selected === "keywords" ? "bg-gray-200" : ""
+          }`}
+          onClick={() => setSelected("keywords")}
+        >
+          <div className="flex justify-center mb-2">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              strokeWidth={1.5}
+              stroke="currentColor"
+              className="w-6 h-6"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"
+              />
+            </svg>
+          </div>
+          <span className="text-sm font-semibold">FROM KEYWORDS</span>
         </button>
       </div>
 
@@ -179,7 +213,9 @@ const Leads = () => {
           ? "Instagram Post Leads"
           : selected === "accounts"
             ? "Instagram Account Leads"
-            : "Instagram Hashtag Leads"}
+            : selected === "hashtags"
+              ? "Instagram Hashtag Leads"
+              : "Instagram Keyword Leads"}
       </h2>
 
       <form onSubmit={fetchLeads} className="mb-6">
@@ -190,7 +226,9 @@ const Leads = () => {
               ? "Enter Instagram post URL"
               : selected === "accounts"
                 ? "Enter Instagram account URL"
-                : "Enter hashtag (e.g., programming)"
+                : selected === "hashtags"
+                  ? "Enter hashtag (e.g., programming)"
+                  : "Enter keywords to search (e.g., web developer)"
           }
           value={postUrl}
           onChange={(e) => setPostUrl(e.target.value)}
@@ -226,6 +264,7 @@ const Leads = () => {
       </form>
 
       {error && <div className="text-red-600 mb-4">{error}</div>}
+      {success && <div className="text-green-600 mb-4">{success}</div>}
 
       <div className="overflow-x-auto">
         {loading ? (
@@ -241,13 +280,29 @@ const Leads = () => {
             </h3>
             <div className="grid gap-4">
               {leads.map((lead, i) => (
-                <div key={i} className="p-4 border rounded bg-white shadow-sm">
-                  <div className="text-gray-600">{lead.username}</div>
-                  {lead.comment && (
-                    <div className="text-gray-400 text-sm mt-1">
-                      {lead.comment}
+                <div
+                  key={i}
+                  className={`p-4 border rounded shadow-sm transition-colors duration-300 ${
+                    addedLeads.has(lead.username)
+                      ? "bg-green-50 border-green-200"
+                      : "bg-white"
+                  }`}
+                >
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <div className="text-gray-600">{lead.username}</div>
+                      {lead.caption && (
+                        <div className="text-gray-400 text-sm mt-1">
+                          {lead.caption}
+                        </div>
+                      )}
                     </div>
-                  )}
+                    {addedLeads.has(lead.username) && (
+                      <div className="text-green-600 text-sm">
+                        Added to targets ✓
+                      </div>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -258,7 +313,9 @@ const Leads = () => {
               ? "Enter a post URL above to fetch leads"
               : selected === "accounts"
                 ? "Enter an account URL above to fetch leads"
-                : "Enter a hashtag above to fetch leads"}
+                : selected === "hashtags"
+                  ? "Enter a hashtag above to fetch leads"
+                  : "Enter keywords above to fetch leads"}
           </div>
         )}
       </div>

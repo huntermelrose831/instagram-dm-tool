@@ -2,13 +2,28 @@ const express = require("express");
 const cors = require("cors");
 const { sendDMs } = require("./sendDMs");
 const puppeteer = require("puppeteer");
-
+const { initializeScheduler, RATE_LIMITS } = require("./scheduler");
+const { ApifyClient } = require("apify-client");
 const accountsStore = require("./accountsStore");
 const targetsStore = require("./targetsStore");
+const {
+  createCampaign,
+  getCampaigns,
+  updateCampaignStatus,
+  updateCampaignStats,
+  deleteCampaign,
+  createContact,
+  getContacts,
+  recordInteraction,
+  updateDMRateLimits,
+  getDMStats,
+  scheduleDM,
+  getScheduledJobs,
+} = require("./database");
+
 const app = express();
 const PORT = 5000;
 require("dotenv").config();
-const { ApifyClient } = require("apify-client");
 
 // Custom delay function using Promise
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -20,56 +35,36 @@ const apifyClient = new ApifyClient({
 app.use(cors({ origin: "*", credentials: true }));
 app.use(express.json());
 
-app.post("/api/send-dms", async (req, res) => {
-  const { username, usernames, message, useApify } = req.body;
+// Initialize the scheduler when the server starts
+initializeScheduler();
 
+app.post("/api/send-dms", async (req, res) => {
   try {
+    const { username, usernames, message } = req.body;
+
     if (!username || !usernames || !message) {
       return res.status(400).json({
         status: "error",
-        message: "Missing required fields: username, usernames, or message",
+        message: "Missing required fields",
+        details: { username, usernames, message },
       });
     }
 
-    if (useApify) {
-      const account = accountsStore.getAccountByUsername(username);
-      const sessionCookie = account?.cookies?.find(
-        (c) => c.name === "sessionid"
-      );
+    await sendDMs({
+      igUsername: username,
+      usernames,
+      message,
+    });
 
-      if (!sessionCookie) {
-        return res.status(400).json({
-          status: "error",
-          message: "Session ID not found for selected account",
-        });
-      }
-      console.log(req.body);
-
-      console.log("Received usernames:", usernames);
-      console.log("Type of usernames:", typeof usernames);
-
-      return res.json({
-        status: "success",
-        message: "Messages sent successfully via Apify",
-      });
-    } else {
-      await sendDMs({
-        igUsername: username,
-        usernames,
-        message,
-      });
-
-      return res.json({
-        status: "success",
-        message: "Messages sent successfully via Puppeteer",
-      });
-    }
+    res.json({
+      status: "success",
+      message: "Messages sent successfully",
+    });
   } catch (err) {
     console.error("DM sending error:", err);
     res.status(500).json({
       status: "error",
-      message: "Failed to send DMs",
-      error: err.message,
+      message: err.message || "Failed to send DMs",
     });
   }
 });
@@ -344,6 +339,64 @@ app.post("/api/scrape/hashtags", async (req, res) => {
     });
   }
 });
+// Endpoint to scrape comments from a hashtag
+app.post("/api/scrape/keywords", async (req, res) => {
+  try {
+    const { postUrl: keywords } = req.body;
+    console.log("Starting keyword search for:", keywords);
+
+    if (!process.env.APIFY_TOKEN) {
+      throw new Error("APIFY_TOKEN is not set in environment variables");
+    } // Prepare Actor input for hashtag search first to find relevant profiles
+    const input = {
+      hashtags: [keywords.replace(/\s+/g, "")], // Remove spaces from keywords to make it a valid hashtag
+      resultsLimit: 20,
+    };
+    console.log("Actor input:", input);
+
+    // Run the Actor and wait for it to finish
+    const run = await apifyClient
+      .actor("apify/instagram-hashtag-scraper")
+      .call(input);
+    console.log("Run completed, dataset ID:", run.defaultDatasetId);
+
+    // Get the dataset
+    const { items } = await apifyClient
+      .dataset(run.defaultDatasetId)
+      .listItems();
+    let leads = [];
+    if (items && items.length > 0) {
+      // Extract usernames from posts related to the keyword
+      leads = items
+        .map((item) => ({
+          username: item.ownerUsername,
+          profileUrl: `https://instagram.com/${item.ownerUsername}`,
+          caption: item.caption || "",
+          timestamp: item.timestamp || new Date().toISOString(),
+        }))
+        .filter((lead) => lead.username) // Remove any undefined usernames
+        .filter(
+          (lead, index, self) =>
+            // Remove duplicates
+            index === self.findIndex((l) => l.username === lead.username)
+        )
+        .slice(0, 15); // Limit to 15 results
+    }
+
+    console.log("Processed leads:", leads);
+    res.json({
+      status: "success",
+      leads,
+    });
+  } catch (error) {
+    console.error("Error searching leads by keywords:", error);
+    res.status(500).json({
+      status: "error",
+      message: error.message || "Failed to search leads",
+    });
+  }
+});
+
 // Target usernames endpoints
 app.get("/api/targets", (req, res) => {
   try {
@@ -375,6 +428,283 @@ app.delete("/api/targets/:username", (req, res) => {
     res.json({ status: "success", targets });
   } catch (err) {
     res.status(500).json({ status: "error", message: err.message });
+  }
+});
+
+// Endpoint to schedule DMs
+app.post("/api/schedule-dms", async (req, res) => {
+  try {
+    console.log("Received scheduling request:", req.body);
+
+    const {
+      fromUsername,
+      targetUsernames,
+      messageVariations,
+      scheduleTime,
+      isRecurring,
+      recurringInterval,
+    } = req.body;
+
+    // Validate required fields
+    if (
+      !fromUsername ||
+      !targetUsernames ||
+      !messageVariations ||
+      !scheduleTime
+    ) {
+      return res.status(400).json({
+        status: "error",
+        message: "Missing required fields",
+        details: {
+          fromUsername,
+          targetUsernames,
+          messageVariations,
+          scheduleTime,
+        },
+      });
+    }
+
+    const jobId = await scheduleDM({
+      fromUsername,
+      targetUsernames,
+      messageVariations,
+      scheduleTime,
+      isRecurring,
+      recurringInterval,
+    });
+
+    res.json({
+      status: "success",
+      message: "DM scheduled successfully",
+      jobId,
+    });
+  } catch (err) {
+    console.error("Error scheduling DMs:", err);
+    res.status(500).json({
+      status: "error",
+      message: err.message || "Failed to schedule DMs",
+    });
+  }
+});
+
+// Endpoint to get DM stats and rate limits
+app.get("/api/dm-stats/:username", async (req, res) => {
+  try {
+    const { username } = req.params;
+    const stats = await getDMStats(username);
+
+    res.json({
+      status: "success",
+      stats: {
+        ...stats,
+        maxDMsPerDay: RATE_LIMITS.MAX_DMS_PER_DAY,
+        remainingDMs: RATE_LIMITS.MAX_DMS_PER_DAY - (stats.daily_dm_count || 0),
+      },
+    });
+  } catch (err) {
+    console.error("Error fetching DM stats:", err);
+    res.status(500).json({
+      status: "error",
+      message: "Failed to fetch DM stats",
+      error: err.message,
+    });
+  }
+});
+
+// Endpoint to get all scheduled jobs
+app.get("/api/scheduled-jobs", async (req, res) => {
+  try {
+    const jobs = await getScheduledJobs();
+    res.json({
+      status: "success",
+      jobs,
+    });
+  } catch (err) {
+    console.error("Error fetching scheduled jobs:", err);
+    res.status(500).json({
+      status: "error",
+      message: "Failed to fetch scheduled jobs",
+      error: err.message,
+    });
+  }
+});
+
+// Campaign Management Routes
+app.get("/api/campaigns", async (req, res) => {
+  try {
+    const campaigns = await getCampaigns();
+    res.json({ status: "success", campaigns });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+app.post("/api/campaigns", async (req, res) => {
+  try {
+    const {
+      name,
+      account_username,
+      message_variations,
+      target_usernames,
+      schedule_time,
+      is_scheduled,
+    } = req.body;
+
+    // Validate the account exists
+    const account = accountsStore.getAccountByUsername(account_username);
+    if (!account) {
+      return res.status(400).json({
+        status: "error",
+        message: "Selected account not found",
+      });
+    }
+
+    const campaignId = await createCampaign({
+      name,
+      account_username,
+      message_variations,
+      target_usernames,
+      schedule_time: is_scheduled ? schedule_time : null,
+      is_scheduled,
+    });
+
+    res.json({
+      status: "success",
+      message: "Campaign created successfully",
+      campaignId,
+    });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+app.patch("/api/campaigns/:id/status", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    await updateCampaignStatus(id, status);
+    res.json({
+      status: "success",
+      message: "Campaign status updated successfully",
+    });
+  } catch (err) {
+    console.error("Failed to update campaign status:", err);
+    res.status(500).json({
+      status: "error",
+      message: "Failed to update campaign status",
+      error: err.message,
+    });
+  }
+});
+
+app.delete("/api/campaigns/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    await deleteCampaign(id);
+    res.json({
+      status: "success",
+      message: "Campaign deleted successfully",
+    });
+  } catch (err) {
+    console.error("Failed to delete campaign:", err);
+    res.status(500).json({
+      status: "error",
+      message: "Failed to delete campaign",
+      error: err.message,
+    });
+  }
+});
+
+// CRM Routes
+app.get("/api/crm/contacts", async (req, res) => {
+  try {
+    const { status, tag } = req.query;
+    const contacts = getContacts({ status, tag });
+    res.json({ status: "success", contacts });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+app.post("/api/crm/contacts", async (req, res) => {
+  try {
+    const { username } = req.body;
+    if (!username) {
+      return res
+        .status(400)
+        .json({ status: "error", message: "Username is required" });
+    }
+    const contact = createContact(username);
+    res.json({ status: "success", contact });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+app.patch("/api/crm/contacts/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    if (!status) {
+      return res
+        .status(400)
+        .json({ status: "error", message: "Status is required" });
+    }
+    const contact = updateContactStatus(id, status);
+    if (!contact) {
+      return res
+        .status(404)
+        .json({ status: "error", message: "Contact not found" });
+    }
+    // Record status change interaction
+    recordInteraction(id, "status_change", `Status changed to ${status}`);
+    res.json({ status: "success", contact });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+app.post("/api/crm/contacts/:id/notes", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { note } = req.body;
+    if (!note) {
+      return res
+        .status(400)
+        .json({ status: "error", message: "Note content is required" });
+    }
+    const newNote = addNote(id, note);
+    // Record note added interaction
+    recordInteraction(id, "note_added", "Note added");
+    res.json({ status: "success", note: newNote });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+app.post("/api/crm/contacts/:id/tags", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { tag } = req.body;
+    if (!tag) {
+      return res
+        .status(400)
+        .json({ status: "error", message: "Tag name is required" });
+    }
+    addTagToContact(id, tag);
+    res.json({ status: "success", message: "Tag added successfully" });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+app.delete("/api/crm/contacts/:id/tags/:tag", async (req, res) => {
+  try {
+    const { id, tag } = req.params;
+    removeTagFromContact(id, tag);
+    res.json({ status: "success", message: "Tag removed successfully" });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: error.message });
   }
 });
 

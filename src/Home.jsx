@@ -26,13 +26,20 @@ const Home = () => (
         <div className="bg-white rounded shadow p-6 hover:shadow-lg transition cursor-pointer">
           <h2 className="text-xl font-semibold mb-2">Find Leads</h2>
           <p>Discover leads by Instagram post URL and more coming soon.</p>
-        </div>
+        </div>{" "}
       </Link>
 
       <Link to="/accounts">
         <div className="bg-white rounded shadow p-6 hover:shadow-lg transition cursor-pointer">
           <h2 className="text-xl font-semibold mb-2">Accounts</h2>
           <p>Manage multiple Instagram accounts and stay signed in.</p>
+        </div>
+      </Link>
+
+      <Link to="/campaigns">
+        <div className="bg-white rounded shadow p-6 hover:shadow-lg transition cursor-pointer">
+          <h2 className="text-xl font-semibold mb-2">Campaigns</h2>
+          <p>Create and manage DM campaigns with A/B testing and analytics.</p>
         </div>
       </Link>
     </div>
