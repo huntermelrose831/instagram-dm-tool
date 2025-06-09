@@ -619,23 +619,20 @@ app.delete("/api/campaigns/:id", async (req, res) => {
 app.get("/api/crm/contacts", async (req, res) => {
   try {
     const { status, tag } = req.query;
-    const contacts = getContacts({ status, tag });
+    const contacts = await getContacts({ status, tag });
     res.json({ status: "success", contacts });
   } catch (error) {
+    console.error("Error fetching contacts:", error);
     res.status(500).json({ status: "error", message: error.message });
   }
 });
 
-app.post("/api/crm/contacts", async (req, res) => {
+app.post("/api/crm/contacts/:id/notes", async (req, res) => {
   try {
-    const { username } = req.body;
-    if (!username) {
-      return res
-        .status(400)
-        .json({ status: "error", message: "Username is required" });
-    }
-    const contact = createContact(username);
-    res.json({ status: "success", contact });
+    const { id } = req.params;
+    const { note } = req.body;
+    const noteId = await addNote(id, note);
+    res.json({ status: "success", noteId });
   } catch (error) {
     res.status(500).json({ status: "error", message: error.message });
   }
@@ -645,38 +642,8 @@ app.patch("/api/crm/contacts/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
-    if (!status) {
-      return res
-        .status(400)
-        .json({ status: "error", message: "Status is required" });
-    }
-    const contact = updateContactStatus(id, status);
-    if (!contact) {
-      return res
-        .status(404)
-        .json({ status: "error", message: "Contact not found" });
-    }
-    // Record status change interaction
-    recordInteraction(id, "status_change", `Status changed to ${status}`);
-    res.json({ status: "success", contact });
-  } catch (error) {
-    res.status(500).json({ status: "error", message: error.message });
-  }
-});
-
-app.post("/api/crm/contacts/:id/notes", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { note } = req.body;
-    if (!note) {
-      return res
-        .status(400)
-        .json({ status: "error", message: "Note content is required" });
-    }
-    const newNote = addNote(id, note);
-    // Record note added interaction
-    recordInteraction(id, "note_added", "Note added");
-    res.json({ status: "success", note: newNote });
+    await updateContactStatus(id, status);
+    res.json({ status: "success" });
   } catch (error) {
     res.status(500).json({ status: "error", message: error.message });
   }
@@ -686,13 +653,8 @@ app.post("/api/crm/contacts/:id/tags", async (req, res) => {
   try {
     const { id } = req.params;
     const { tag } = req.body;
-    if (!tag) {
-      return res
-        .status(400)
-        .json({ status: "error", message: "Tag name is required" });
-    }
-    addTagToContact(id, tag);
-    res.json({ status: "success", message: "Tag added successfully" });
+    await addTag(id, tag);
+    res.json({ status: "success" });
   } catch (error) {
     res.status(500).json({ status: "error", message: error.message });
   }
@@ -701,8 +663,8 @@ app.post("/api/crm/contacts/:id/tags", async (req, res) => {
 app.delete("/api/crm/contacts/:id/tags/:tag", async (req, res) => {
   try {
     const { id, tag } = req.params;
-    removeTagFromContact(id, tag);
-    res.json({ status: "success", message: "Tag removed successfully" });
+    await removeTag(id, tag);
+    res.json({ status: "success" });
   } catch (error) {
     res.status(500).json({ status: "error", message: error.message });
   }

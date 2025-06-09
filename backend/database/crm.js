@@ -14,46 +14,56 @@ function createContact(username) {
 
 function getContacts(filters = {}) {
   let query = `
-    SELECT c.*,
-    GROUP_CONCAT(DISTINCT t.name) as tags,
-    GROUP_CONCAT(DISTINCT n.content || '|' || n.created_at) as notes
+    SELECT 
+      c.*,
+      GROUP_CONCAT(DISTINCT t.name) as tags,
+      GROUP_CONCAT(DISTINCT json_object(
+        'id', n.id,
+        'content', n.content,
+        'created_at', n.created_at
+      )) as notes
     FROM crm_contacts c
     LEFT JOIN crm_contact_tags ct ON c.id = ct.contact_id
     LEFT JOIN crm_tags t ON ct.tag_id = t.id
     LEFT JOIN crm_notes n ON c.id = n.contact_id
   `;
 
-  const conditions = [];
+  const whereConditions = [];
   const params = [];
 
   if (filters.status) {
-    conditions.push("c.status = ?");
+    whereConditions.push("c.status = ?");
     params.push(filters.status);
   }
 
   if (filters.tag) {
-    conditions.push("t.name = ?");
-    params.push(filters.tag);
+    whereConditions.push("t.name LIKE ?");
+    params.push(`%${filters.tag}%`);
   }
 
-  if (conditions.length > 0) {
-    query += " WHERE " + conditions.join(" AND ");
+  if (whereConditions.length > 0) {
+    query += " WHERE " + whereConditions.join(" AND ");
   }
 
   query += " GROUP BY c.id ORDER BY c.last_interaction DESC NULLS LAST";
 
-  const stmt = db.prepare(query);
-  const contacts = stmt.all(...params);
+  const contacts = db.prepare(query).all(params);
 
-  // Parse notes and tags
   return contacts.map((contact) => ({
     ...contact,
     tags: contact.tags ? contact.tags.split(",") : [],
     notes: contact.notes
-      ? contact.notes.split(",").map((note) => {
-          const [content, created_at] = note.split("|");
-          return { content, created_at };
-        })
+      ? contact.notes
+          .split(",")
+          .map((note) => {
+            try {
+              return JSON.parse(note);
+            } catch (e) {
+              console.error("Error parsing note:", note);
+              return null;
+            }
+          })
+          .filter((note) => note !== null)
       : [],
   }));
 }
