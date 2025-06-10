@@ -1,54 +1,176 @@
 import React, { useState, useEffect } from "react";
+import {
+  FaSearch,
+  FaFilter,
+  FaReply,
+  FaUser,
+  FaCheck,
+  FaCheckDouble,
+  FaClock,
+  FaArchive,
+  FaStar,
+  FaTag,
+  FaEllipsisV,
+  FaPaperPlane,
+  FaRobot,
+  FaUserCheck,
+} from "react-icons/fa";
 
 const Inbox = () => {
-  const [accounts, setAccounts] = useState([]);
-  const [selected, setSelected] = useState("");
-  const [convos, setConvos] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [activeThread, setActiveThread] = useState(null);
+  const [conversations, setConversations] = useState([]);
+  const [selectedConversation, setSelectedConversation] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [newMessage, setNewMessage] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
 
   useEffect(() => {
-    fetch("http://localhost:5000/api/accounts")
-      .then((r) => r.json())
-      .then(setAccounts);
-  }, []);
+    fetchConversations();
+  }, [filterStatus]);
 
-  const loadInbox = async (username) => {
-    setSelected(username);
-    setLoading(true);
-    setError("");
-    setConvos([]);
-    setActiveThread(null);
-    try {
-      const res = await fetch(`http://localhost:5000/api/inbox/${username}`);
-      const data = await res.json();
-      if (data.status === "success") {
-        setConvos(data.conversations || []);
-        if (data.conversations && data.conversations.length === 0) {
-          setError(
-            "No conversations found in your inbox. They may take a moment to load."
-          );
-        }
-      } else {
-        setError(data.message || "Failed to load inbox");
-        console.error("Backend error:", data.message);
-      }
-    } catch (e) {
-      console.error("Error loading inbox:", e);
-      setError("Failed to load inbox. Please try again.");
+  useEffect(() => {
+    if (selectedConversation) {
+      fetchMessages(selectedConversation.id);
     }
-    setLoading(false);
+  }, [selectedConversation]);
+
+  const fetchConversations = async () => {
+    try {
+      const response = await fetch(
+        `http://localhost:5000/api/inbox/conversations?status=${filterStatus}&search=${searchTerm}`
+      );
+      if (response.ok) {
+        const data = await response.json();
+        setConversations(data.conversations || []);
+      }
+    } catch (error) {
+      console.error("Error fetching conversations:", error);
+    }
   };
 
-  // Helper to get display name for a thread
-  const getThreadName = (thread) => {
-    if (!thread.participants) return "Unknown";
-    return (
-      thread.participants.filter((name) => name !== selected).join(", ") ||
-      thread.participants[0]
-    );
+  const fetchMessages = async (conversationId) => {
+    try {
+      const response = await fetch(
+        `http://localhost:5000/api/inbox/conversations/${conversationId}/messages`
+      );
+      if (response.ok) {
+        const data = await response.json();
+        setMessages(data.messages || []);
+      }
+    } catch (error) {
+      console.error("Error fetching messages:", error);
+    }
   };
+
+  const sendMessage = async () => {
+    if (!newMessage.trim() || !selectedConversation) return;
+
+    setIsLoading(true);
+    try {
+      const response = await fetch(
+        `http://localhost:5000/api/inbox/conversations/${selectedConversation.id}/reply`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: newMessage }),
+        }
+      );
+
+      if (response.ok) {
+        setNewMessage("");
+        fetchMessages(selectedConversation.id);
+        fetchConversations(); // Refresh conversation list
+      }
+    } catch (error) {
+      console.error("Error sending message:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const markAsRead = async (conversationId) => {
+    try {
+      await fetch(
+        `http://localhost:5000/api/inbox/conversations/${conversationId}/mark-read`,
+        { method: "PATCH" }
+      );
+      fetchConversations();
+    } catch (error) {
+      console.error("Error marking as read:", error);
+    }
+  };
+
+  const updateConversationStatus = async (conversationId, status) => {
+    try {
+      await fetch(
+        `http://localhost:5000/api/inbox/conversations/${conversationId}/status`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status }),
+        }
+      );
+      fetchConversations();
+    } catch (error) {
+      console.error("Error updating conversation status:", error);
+    }
+  };
+
+  const addTag = async (conversationId, tag) => {
+    try {
+      await fetch(
+        `http://localhost:5000/api/inbox/conversations/${conversationId}/tags`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tag }),
+        }
+      );
+      fetchConversations();
+    } catch (error) {
+      console.error("Error adding tag:", error);
+    }
+  };
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case "unread":
+        return "bg-red-100 text-red-800";
+      case "read":
+        return "bg-blue-100 text-blue-800";
+      case "replied":
+        return "bg-green-100 text-green-800";
+      case "archived":
+        return "bg-gray-100 text-gray-800";
+      case "starred":
+        return "bg-yellow-100 text-yellow-800";
+      default:
+        return "bg-gray-100 text-gray-800";
+    }
+  };
+
+  const getStatusIcon = (status) => {
+    switch (status) {
+      case "unread":
+        return <FaClock className="text-red-500" />;
+      case "read":
+        return <FaCheck className="text-blue-500" />;
+      case "replied":
+        return <FaCheckDouble className="text-green-500" />;
+      case "archived":
+        return <FaArchive className="text-gray-500" />;
+      case "starred":
+        return <FaStar className="text-yellow-500" />;
+      default:
+        return <FaClock className="text-gray-500" />;
+    }
+  };
+
+  const filteredConversations = conversations.filter((conv) =>
+    conv.username.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   // Helper to get last message preview
   const getLastMsg = (thread) => {

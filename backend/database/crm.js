@@ -1,4 +1,4 @@
-const { db } = require("./index");
+const db = require("./db");
 
 // Contact operations
 function createContact(username) {
@@ -27,9 +27,13 @@ function getContacts(filters = {}) {
     LEFT JOIN crm_tags t ON ct.tag_id = t.id
     LEFT JOIN crm_notes n ON c.id = n.contact_id
   `;
-
   const whereConditions = [];
   const params = [];
+
+  if (filters.id) {
+    whereConditions.push("c.id = ?");
+    params.push(filters.id);
+  }
 
   if (filters.status) {
     whereConditions.push("c.status = ?");
@@ -48,7 +52,6 @@ function getContacts(filters = {}) {
   query += " GROUP BY c.id ORDER BY c.last_interaction DESC NULLS LAST";
 
   const contacts = db.prepare(query).all(params);
-
   return contacts.map((contact) => ({
     ...contact,
     tags: contact.tags ? contact.tags.split(",") : [],
@@ -57,7 +60,12 @@ function getContacts(filters = {}) {
           .split(",")
           .map((note) => {
             try {
-              return JSON.parse(note);
+              const parsed = JSON.parse(note);
+              // Only include notes that have valid content
+              if (parsed && parsed.content) {
+                return parsed;
+              }
+              return null;
             } catch (e) {
               console.error("Error parsing note:", note);
               return null;
@@ -69,13 +77,35 @@ function getContacts(filters = {}) {
 }
 
 function updateContactStatus(contactId, status) {
-  const stmt = db.prepare(`
-    UPDATE crm_contacts
-    SET status = ?, updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-    RETURNING *
-  `);
-  return stmt.get(status, contactId);
+  // Validate the status against allowed values
+  const validStatuses = ["lead", "prospect", "customer", "inactive"];
+  if (!validStatuses.includes(status)) {
+    throw new Error(
+      `Invalid status: ${status}. Must be one of: ${validStatuses.join(", ")}`
+    );
+  }
+
+  try {
+    // Get the contact with all relationships before update
+    const contact = getContacts({ id: parseInt(contactId, 10) })[0];
+    if (!contact) {
+      throw new Error("Contact not found");
+    }
+
+    // Update the status
+    const stmt = db.prepare(`
+      UPDATE crm_contacts
+      SET status = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `);
+    stmt.run(status, contactId);
+
+    // Return the updated contact with all relationships
+    return getContacts({ id: parseInt(contactId, 10) })[0];
+  } catch (error) {
+    console.error("Error updating contact status:", error);
+    throw error;
+  }
 }
 
 // Note operations

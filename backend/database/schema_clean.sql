@@ -1,6 +1,6 @@
--- Create tables in order of dependencies
+-- Clean database schema for Instagram DM Automation Tool
 
--- Base tables first
+-- Campaigns table
 CREATE TABLE IF NOT EXISTS campaigns (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS campaigns (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+-- CRM Contacts table
 CREATE TABLE IF NOT EXISTS crm_contacts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT NOT NULL UNIQUE,
@@ -30,6 +31,17 @@ CREATE TABLE IF NOT EXISTS crm_contacts (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- CRM Contact Tags table
+CREATE TABLE IF NOT EXISTS crm_contact_tags (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    contact_id INTEGER NOT NULL,
+    tag TEXT NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (contact_id) REFERENCES crm_contacts(id) ON DELETE CASCADE,
+    UNIQUE(contact_id, tag)
+);
+
+-- CRM Notes table
 CREATE TABLE IF NOT EXISTS crm_notes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     contact_id INTEGER NOT NULL,
@@ -39,6 +51,7 @@ CREATE TABLE IF NOT EXISTS crm_notes (
     FOREIGN KEY (contact_id) REFERENCES crm_contacts(id) ON DELETE CASCADE
 );
 
+-- CRM Interactions table
 CREATE TABLE IF NOT EXISTS crm_interactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     contact_id INTEGER NOT NULL,
@@ -50,6 +63,7 @@ CREATE TABLE IF NOT EXISTS crm_interactions (
     FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE SET NULL
 );
 
+-- DM Rate Limits table
 CREATE TABLE IF NOT EXISTS dm_rate_limits (
     username TEXT PRIMARY KEY,
     daily_dm_count INTEGER DEFAULT 0,
@@ -58,150 +72,64 @@ CREATE TABLE IF NOT EXISTS dm_rate_limits (
     total_dm_sent INTEGER DEFAULT 0
 );
 
-CREATE TABLE IF NOT EXISTS scheduled_jobs (
+-- Scheduled DMs table
+CREATE TABLE IF NOT EXISTS scheduled_dms (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     from_username TEXT NOT NULL,
     target_usernames TEXT NOT NULL,
-    message_variations TEXT NOT NULL,
-    schedule_time DATETIME NOT NULL,
-    campaign_id INTEGER,
-    status TEXT DEFAULT 'pending',
-    is_recurring BOOLEAN DEFAULT 0,
-    recurring_interval TEXT,
+    message TEXT NOT NULL,
+    scheduled_time DATETIME NOT NULL,
+    status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'running', 'completed', 'failed')),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    last_run DATETIME,
-    error_log TEXT
-);
-
--- Create CRM tables first since they are referenced by other tables
-CREATE TABLE IF NOT EXISTS crm_contacts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL UNIQUE,
-    first_contact DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    last_interaction DATETIME,
-    status TEXT CHECK(status IN ('lead', 'prospect', 'customer', 'inactive')) DEFAULT 'lead',
-    messages_sent INTEGER DEFAULT 0,
-    responses_received INTEGER DEFAULT 0,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS crm_notes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    contact_id INTEGER NOT NULL,
-    content TEXT NOT NULL,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (contact_id) REFERENCES crm_contacts(id) ON DELETE CASCADE
-);
-
--- Table for scheduled DM jobs
-CREATE TABLE IF NOT EXISTS scheduled_jobs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    from_username TEXT NOT NULL,
-    target_usernames TEXT NOT NULL,
-    message_variations TEXT NOT NULL,
-    schedule_time DATETIME NOT NULL,
-    campaign_id INTEGER,
-    status TEXT DEFAULT 'pending',
-    is_recurring BOOLEAN DEFAULT 0,
-    recurring_interval TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    last_run DATETIME,
-    error_log TEXT,
-    FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS dm_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    from_username TEXT NOT NULL,
-    to_username TEXT NOT NULL,
-    message_text TEXT,
-    success BOOLEAN DEFAULT 0,
+    executed_at DATETIME,
     error_message TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
--- Notes table for contact notes/comments
-CREATE TABLE IF NOT EXISTS crm_notes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    contact_id INTEGER NOT NULL,
-    content TEXT NOT NULL,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (contact_id) REFERENCES crm_contacts(id) ON DELETE CASCADE
-);
-
--- Interactions table to track all contact touchpoints
-CREATE TABLE IF NOT EXISTS crm_interactions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    contact_id INTEGER NOT NULL,
-    type TEXT NOT NULL CHECK(type IN ('dm_sent', 'dm_received', 'status_change', 'note_added')),
-    content TEXT,
     campaign_id INTEGER,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (contact_id) REFERENCES crm_contacts(id) ON DELETE CASCADE,
     FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE SET NULL
 );
 
--- Tags table for categorizing contacts
-CREATE TABLE IF NOT EXISTS crm_tags (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
--- Contact-Tag relationship table
-CREATE TABLE IF NOT EXISTS crm_contact_tags (
-    contact_id INTEGER NOT NULL,
-    tag_id INTEGER NOT NULL,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (contact_id, tag_id),
-    FOREIGN KEY (contact_id) REFERENCES crm_contacts(id) ON DELETE CASCADE,
-    FOREIGN KEY (tag_id) REFERENCES crm_tags(id) ON DELETE CASCADE
-);
-
--- Analytics tables
+-- Message Analytics table
 CREATE TABLE IF NOT EXISTS message_analytics (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     campaign_id INTEGER,
-    message_variation TEXT NOT NULL,
-    sent_count INTEGER DEFAULT 0,
-    response_count INTEGER DEFAULT 0,
-    success_rate REAL DEFAULT 0,
-    avg_response_time INTEGER DEFAULT 0,
+    username TEXT NOT NULL,
+    message_sent_at DATETIME NOT NULL,
+    response_received_at DATETIME,
+    response_time_minutes INTEGER,
+    message_variation_id INTEGER,
+    success BOOLEAN DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE
+    FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE SET NULL
 );
 
+-- Account Limits table
 CREATE TABLE IF NOT EXISTS account_limits (
     username TEXT PRIMARY KEY,
-    daily_limit INTEGER DEFAULT 50,
-    hourly_limit INTEGER DEFAULT 20,
-    messages_sent_today INTEGER DEFAULT 0,
-    messages_sent_hour INTEGER DEFAULT 0,
-    last_message_time DATETIME,
-    cooldown_until DATETIME,
-    is_active BOOLEAN DEFAULT 1,
+    daily_dm_limit INTEGER DEFAULT 50,
+    hourly_dm_limit INTEGER DEFAULT 10,
+    current_daily_count INTEGER DEFAULT 0,
+    current_hourly_count INTEGER DEFAULT 0,
+    last_reset_date DATE,
+    last_reset_hour INTEGER,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Follow Up Schedules table
 CREATE TABLE IF NOT EXISTS follow_up_schedules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     contact_id INTEGER NOT NULL,
     campaign_id INTEGER,
-    message_template TEXT NOT NULL,
     scheduled_time DATETIME NOT NULL,
-    conditions TEXT,
-    is_active BOOLEAN DEFAULT 1,
+    message TEXT NOT NULL,
+    status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'sent', 'cancelled')),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (contact_id) REFERENCES crm_contacts(id) ON DELETE CASCADE,
     FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE SET NULL
 );
 
+-- Activity Logs table
 CREATE TABLE IF NOT EXISTS activity_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT NOT NULL,
@@ -212,7 +140,7 @@ CREATE TABLE IF NOT EXISTS activity_logs (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- Triggers to update timestamps (placed after all table creation)
+-- Triggers to update timestamps
 CREATE TRIGGER IF NOT EXISTS update_crm_contacts_timestamp 
 AFTER UPDATE ON crm_contacts
 FOR EACH ROW
@@ -229,7 +157,6 @@ BEGIN
     WHERE id = NEW.id;
 END;
 
--- Adding message_analytics trigger after its table is created
 CREATE TRIGGER IF NOT EXISTS update_message_analytics_timestamp
 AFTER UPDATE ON message_analytics
 FOR EACH ROW

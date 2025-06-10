@@ -1,4 +1,4 @@
-const { db } = require("./index");
+const db = require("./db");
 
 // Scheduled Jobs
 function addScheduledJob({
@@ -9,20 +9,48 @@ function addScheduledJob({
   isRecurring,
   recurringInterval,
 }) {
+  console.log("Adding scheduled job:", {
+    fromUsername,
+    targetCount: targetUsernames.length,
+    messageCount: messageVariations.length,
+    scheduleTime,
+    isRecurring,
+  });
+  // Convert schedule time to a proper datetime and format it for SQLite
+  const scheduleDate = new Date(scheduleTime);
+  console.log("Schedule time details:", {
+    original: scheduleTime,
+    parsed: scheduleDate.toISOString(),
+    local: scheduleDate.toLocaleString(),
+  });
+
   const stmt = db.prepare(`
     INSERT INTO scheduled_jobs 
-    (from_username, target_usernames, message_variations, schedule_time, is_recurring, recurring_interval)
-    VALUES (?, ?, ?, ?, ?, ?)
+    (from_username, target_usernames, message_variations, schedule_time, campaign_id, status, is_recurring, recurring_interval)
+    VALUES (?, ?, ?, datetime(?), ?, ?, ?, ?)
   `);
 
-  const result = stmt.run(
-    fromUsername,
-    JSON.stringify(targetUsernames),
-    JSON.stringify(messageVariations),
-    scheduleTime,
-    isRecurring ? 1 : 0,
-    recurringInterval
-  );
+  try {
+    const result = stmt.run(
+      fromUsername,
+      JSON.stringify(targetUsernames),
+      JSON.stringify(messageVariations),
+      scheduleDate.toISOString(),
+      null, // campaign_id
+      "pending",
+      isRecurring ? 1 : 0,
+      recurringInterval
+    );
+
+    console.log(
+      "Successfully added scheduled job with ID:",
+      result.lastInsertRowid
+    );
+    return result.lastInsertRowid;
+  } catch (error) {
+    console.error("Error adding scheduled job:", error);
+    throw error;
+  }
 
   return result.lastInsertRowid;
 }
@@ -170,10 +198,121 @@ function updateDMRateLimits(username) {
   stmt.run(username);
 }
 
+// Alias for updateDMRateLimits to maintain compatibility
+const updateDMCount = updateDMRateLimits;
+
+function getPendingJobs() {
+  const now = new Date();
+  console.log("Querying for pending jobs at:", now.toISOString());
+  console.log("Local time:", now.toLocaleString());
+
+  // First, let's see all jobs to debug
+  const allJobs = db
+    .prepare(`SELECT id, schedule_time, status FROM scheduled_jobs`)
+    .all();
+  console.log("All jobs in database:", allJobs);
+
+  // Convert schedule_time to Unix timestamp for comparison
+  const stmt = db.prepare(`
+    SELECT *
+    FROM scheduled_jobs 
+    WHERE status = 'pending' 
+    AND unixepoch(schedule_time) <= unixepoch('now')
+    ORDER BY schedule_time ASC
+  `);
+
+  const jobs = stmt.all();
+  console.log("Pending jobs found:", jobs);
+
+  return jobs.map((job) => ({
+    ...job,
+    target_usernames: JSON.parse(job.target_usernames || "[]"),
+    message_variations: JSON.parse(job.message_variations || "[]"),
+  }));
+}
+
+// Campaign target management functions
+function addCampaignTarget(campaignId, username) {
+  const stmt = db.prepare(`
+    INSERT INTO campaign_targets (campaign_id, username, status)
+    VALUES (?, ?, 'pending')
+    ON CONFLICT(campaign_id, username) DO NOTHING
+  `);
+
+  const result = stmt.run(campaignId, username);
+  return result.changes > 0;
+}
+
+function getCampaignTargets(campaignId) {
+  const stmt = db.prepare(`
+    SELECT id, username, status, created_at, contacted_at
+    FROM campaign_targets 
+    WHERE campaign_id = ?
+    ORDER BY created_at DESC
+  `);
+
+  return stmt.all(campaignId);
+}
+
+function removeCampaignTarget(campaignId, targetId) {
+  const stmt = db.prepare(`
+    DELETE FROM campaign_targets 
+    WHERE campaign_id = ? AND id = ?
+  `);
+
+  const result = stmt.run(campaignId, targetId);
+  return result.changes > 0;
+}
+
+function updateTargetStatus(campaignId, username, status, contactedAt = null) {
+  const stmt = db.prepare(`
+    UPDATE campaign_targets 
+    SET status = ?, contacted_at = COALESCE(?, contacted_at)
+    WHERE campaign_id = ? AND username = ?
+  `);
+
+  const result = stmt.run(status, contactedAt, campaignId, username);
+  return result.changes > 0;
+}
+
+// Campaign replies management
+function addCampaignReply(campaignId, username, message, isRead = false) {
+  const stmt = db.prepare(`
+    INSERT INTO campaign_replies (campaign_id, username, message, is_read, created_at)
+    VALUES (?, ?, ?, ?, datetime('now'))
+  `);
+
+  const result = stmt.run(campaignId, username, message, isRead ? 1 : 0);
+  return result.lastInsertRowid;
+}
+
+function getCampaignReplies(campaignId) {
+  const stmt = db.prepare(`
+    SELECT id, username, message, is_read, created_at
+    FROM campaign_replies 
+    WHERE campaign_id = ?
+    ORDER BY created_at DESC
+  `);
+
+  return stmt.all(campaignId);
+}
+
+function markReplyAsRead(replyId) {
+  const stmt = db.prepare(`
+    UPDATE campaign_replies 
+    SET is_read = 1
+    WHERE id = ?
+  `);
+
+  const result = stmt.run(replyId);
+  return result.changes > 0;
+}
+
 module.exports = {
   addScheduledJob,
   getScheduledJobs,
   updateJobStatus,
+  getPendingJobs,
   getDMStats,
   logDM,
   createCampaign,
@@ -181,5 +320,13 @@ module.exports = {
   updateCampaignStats,
   updateCampaignStatus,
   deleteCampaign,
-  updateDMRateLimits,
+  updateDMCount,
+  scheduleDM: addScheduledJob, // Alias addScheduledJob as scheduleDM for compatibility
+  addCampaignTarget,
+  getCampaignTargets,
+  removeCampaignTarget,
+  updateTargetStatus,
+  addCampaignReply,
+  getCampaignReplies,
+  markReplyAsRead,
 };

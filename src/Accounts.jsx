@@ -1,138 +1,1185 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import {
+  FaInstagram,
+  FaPlus,
+  FaTrash,
+  FaEdit,
+  FaCheckCircle,
+  FaTimesCircle,
+  FaCog,
+  FaEye,
+  FaEyeSlash,
+  FaShieldAlt,
+  FaExchangeAlt,
+  FaGlobe,
+  FaClock,
+  FaExclamationTriangle,
+  FaBan,
+  FaPlay,
+  FaPause,
+  FaChartLine,
+  FaRobot,
+  FaUserShield,
+  FaServer,
+} from "react-icons/fa";
 
 const Accounts = () => {
-  const [accounts, setAccounts] = useState(() => {
-    // Load from localStorage if available
-    const saved = localStorage.getItem("igAccounts");
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  const [status, setStatus] = useState("");
+  // Main tab state
+  const [activeTab, setActiveTab] = useState("accounts");
 
-  // Actually try to sign in to Instagram backend
+  // Original accounts functionality
+  const [accounts, setAccounts] = useState([]);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [newAccount, setNewAccount] = useState({
+    username: "",
+    password: "",
+    proxy: "",
+    dailyLimit: 50,
+    notes: "",
+  });
+  const [editingAccount, setEditingAccount] = useState(null);
+  const [showPasswords, setShowPasswords] = useState({});
+
+  // Safety monitoring data
+  const [safetyAccounts, setSafetyAccounts] = useState([]);
+  const [proxies, setProxies] = useState([]);
+  const [rateLimits, setRateLimits] = useState([]);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [selectedAccount, setSelectedAccount] = useState(null);
+
+  // Form states for safety features
+  const [newProxy, setNewProxy] = useState({
+    host: "",
+    port: "",
+    username: "",
+    password: "",
+    type: "http",
+  });
+
+  const [newRateLimit, setNewRateLimit] = useState({
+    accountId: "",
+    dmPerHour: 10,
+    dmPerDay: 100,
+    followPerHour: 20,
+    followPerDay: 200,
+    isActive: true,
+  });
+  useEffect(() => {
+    fetchAccounts();
+    if (
+      activeTab === "safety" ||
+      activeTab === "proxies" ||
+      activeTab === "limits"
+    ) {
+      fetchSafetyAccounts();
+      fetchProxies();
+      fetchRateLimits();
+    }
+  }, [activeTab]);
+  const fetchAccounts = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch("/api/accounts");
+      if (response.ok) {
+        const data = await response.json();
+        setAccounts(data);
+      }
+    } catch (error) {
+      console.error("Error fetching accounts:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Safety monitoring API functions
+  const fetchSafetyAccounts = async () => {
+    try {
+      const response = await fetch(
+        "http://localhost:5000/api/account-safety/accounts"
+      );
+      if (response.ok) {
+        const data = await response.json();
+        setSafetyAccounts(data.accounts || []);
+      }
+    } catch (error) {
+      console.error("Error fetching safety accounts:", error);
+    }
+  };
+
+  const fetchProxies = async () => {
+    try {
+      const response = await fetch(
+        "http://localhost:5000/api/account-safety/proxies"
+      );
+      if (response.ok) {
+        const data = await response.json();
+        setProxies(data.proxies || []);
+      }
+    } catch (error) {
+      console.error("Error fetching proxies:", error);
+    }
+  };
+
+  const fetchRateLimits = async () => {
+    try {
+      const response = await fetch(
+        "http://localhost:5000/api/account-safety/rate-limits"
+      );
+      if (response.ok) {
+        const data = await response.json();
+        setRateLimits(data.rateLimits || []);
+      }
+    } catch (error) {
+      console.error("Error fetching rate limits:", error);
+    }
+  };
+
+  const addProxy = async () => {
+    try {
+      const response = await fetch(
+        "http://localhost:5000/api/account-safety/proxies",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(newProxy),
+        }
+      );
+
+      if (response.ok) {
+        fetchProxies();
+        setShowAddModal(false);
+        setNewProxy({
+          host: "",
+          port: "",
+          username: "",
+          password: "",
+          type: "http",
+        });
+      }
+    } catch (error) {
+      console.error("Error adding proxy:", error);
+    }
+  };
+
+  const toggleAccountRotation = async (accountId, enabled) => {
+    try {
+      await fetch(
+        `http://localhost:5000/api/account-safety/accounts/${accountId}/rotation`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled }),
+        }
+      );
+      fetchSafetyAccounts();
+    } catch (error) {
+      console.error("Error toggling account rotation:", error);
+    }
+  };
+
+  const performHealthCheck = async (accountId) => {
+    try {
+      const response = await fetch(
+        `http://localhost:5000/api/account-safety/health-check/${accountId}`
+      );
+      if (response.ok) {
+        const data = await response.json();
+        // You can handle the health check results here
+        console.log("Health check results:", data.healthCheck);
+      }
+    } catch (error) {
+      console.error("Error performing health check:", error);
+    }
+  };
+
   const handleAddAccount = async (e) => {
     e.preventDefault();
-    setError("");
-    setStatus("Signing in...");
-    if (!username || !password) {
-      setError("Username and password required");
-      setStatus("");
+    try {
+      const response = await fetch("/api/accounts", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(newAccount),
+      });
+
+      if (response.ok) {
+        const createdAccount = await response.json();
+        setAccounts([...accounts, createdAccount]);
+        setNewAccount({
+          username: "",
+          password: "",
+          proxy: "",
+          dailyLimit: 50,
+          notes: "",
+        });
+        setShowAddForm(false);
+      }
+    } catch (error) {
+      console.error("Error adding account:", error);
+    }
+  };
+
+  const handleDeleteAccount = async (accountId) => {
+    if (!window.confirm("Are you sure you want to delete this account?")) {
       return;
     }
+
     try {
-      // Use the new backend endpoint for account login and cookie storage
-      const response = await fetch("http://localhost:5000/api/add-account", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
+      const response = await fetch(`/api/accounts/${accountId}`, {
+        method: "DELETE",
       });
-      const data = await response.json();
-      if (data.status === "success") {
-        // Fetch updated account list from backend
-        const accountsRes = await fetch("http://localhost:5000/api/accounts");
-        const accountsList = await accountsRes.json();
-        setAccounts(accountsList);
-        setUsername("");
-        setPassword("");
-        setStatus("Account added and signed in!");
-      } else {
-        setError(data.message || "Failed to sign in");
-        setStatus("");
+
+      if (response.ok) {
+        setAccounts(accounts.filter((account) => account.id !== accountId));
       }
-    } catch (err) {
-      setError("Failed to connect to backend");
-      setStatus("");
+    } catch (error) {
+      console.error("Error deleting account:", error);
     }
   };
 
-  // Remove account by username (backend-driven)
-  const handleRemove = async (idx) => {
-    const usernameToRemove = accounts[idx].username;
-    await fetch(`http://localhost:5000/api/accounts/${usernameToRemove}`, {
-      method: "DELETE",
-    });
-    const accountsRes = await fetch("http://localhost:5000/api/accounts");
-    const accountsList = await accountsRes.json();
-    setAccounts(accountsList);
+  const handleUpdateAccount = async (accountId, updates) => {
+    try {
+      const response = await fetch(`/api/accounts/${accountId}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(updates),
+      });
+
+      if (response.ok) {
+        const updatedAccount = await response.json();
+        setAccounts(
+          accounts.map((account) =>
+            account.id === accountId ? updatedAccount : account
+          )
+        );
+        setEditingAccount(null);
+      }
+    } catch (error) {
+      console.error("Error updating account:", error);
+    }
   };
 
-  // On mount, load accounts from backend
-  React.useEffect(() => {
-    fetch("http://localhost:5000/api/accounts")
-      .then((r) => r.json())
-      .then(setAccounts);
-  }, []);
+  const togglePasswordVisibility = (accountId) => {
+    setShowPasswords((prev) => ({
+      ...prev,
+      [accountId]: !prev[accountId],
+    }));
+  };
 
+  const getStatusColor = (status) => {
+    switch (status) {
+      case "active":
+        return "text-green-600";
+      case "suspended":
+        return "text-red-600";
+      case "limited":
+        return "text-yellow-600";
+      default:
+        return "text-gray-600";
+    }
+  };
+
+  const getStatusIcon = (status) => {
+    switch (status) {
+      case "active":
+        return <FaCheckCircle className="text-green-600" />;
+      case "suspended":
+        return <FaTimesCircle className="text-red-600" />;
+      case "limited":
+        return <FaTimesCircle className="text-yellow-600" />;
+      default:
+        return <FaTimesCircle className="text-gray-600" />;
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-white py-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-center items-center h-64">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600"></div>
+          </div>
+        </div>
+      </div>
+    );
+  }
   return (
-    <div className="p-8 max-w-2xl mx-auto">
-      <h1 className="text-2xl font-bold mb-4">Instagram Accounts</h1>
-      <form
-        onSubmit={handleAddAccount}
-        className="mb-6 bg-white p-4 rounded shadow"
-      >
-        <div className="mb-2">
-          <label className="block mb-1 font-medium">Username</label>
-          <input
-            type="text"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            className="w-full border rounded px-2 py-1"
-            required
-          />
+    <div className="min-h-screen bg-white py-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        {/* Header */}
+        <div className="mb-8">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold text-black flex items-center gap-3">
+                <FaInstagram className="text-green-600" />
+                Account Management & Safety
+              </h1>
+              <p className="text-gray-600 mt-2">
+                Manage your Instagram accounts, monitor safety, and configure
+                protection settings
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                if (activeTab === "accounts") {
+                  setShowAddForm(!showAddForm);
+                } else if (activeTab === "proxies") {
+                  setShowAddModal(true);
+                }
+              }}
+              className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-medium flex items-center gap-2 transition-colors"
+            >
+              <FaPlus className="text-sm" />
+              {activeTab === "accounts"
+                ? "Add Account"
+                : activeTab === "proxies"
+                  ? "Add Proxy"
+                  : "Add"}
+            </button>
+          </div>
+
+          {/* Tab Navigation */}
+          <div className="flex space-x-1 mt-6">
+            <button
+              onClick={() => setActiveTab("accounts")}
+              className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                activeTab === "accounts"
+                  ? "bg-green-600 text-white"
+                  : "bg-white text-gray-700 hover:bg-gray-100"
+              }`}
+            >
+              <FaInstagram className="inline mr-2" />
+              Accounts
+            </button>
+            <button
+              onClick={() => setActiveTab("safety")}
+              className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                activeTab === "safety"
+                  ? "bg-green-600 text-white"
+                  : "bg-white text-gray-700 hover:bg-gray-100"
+              }`}
+            >
+              <FaShieldAlt className="inline mr-2" />
+              Safety Monitor
+            </button>
+            <button
+              onClick={() => setActiveTab("proxies")}
+              className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                activeTab === "proxies"
+                  ? "bg-green-600 text-white"
+                  : "bg-white text-gray-700 hover:bg-gray-100"
+              }`}
+            >
+              <FaServer className="inline mr-2" />
+              Proxies
+            </button>
+            <button
+              onClick={() => setActiveTab("limits")}
+              className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                activeTab === "limits"
+                  ? "bg-green-600 text-white"
+                  : "bg-white text-gray-700 hover:bg-gray-100"
+              }`}
+            >
+              <FaClock className="inline mr-2" />
+              Rate Limits
+            </button>
+          </div>
         </div>
-        <div className="mb-2">
-          <label className="block mb-1 font-medium">Password</label>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full border rounded px-2 py-1"
-            required
-          />
-        </div>
-        {error && <div className="text-red-600 mb-2">{error}</div>}
-        {status && <div className="text-green-700 mb-2">{status}</div>}
-        <button
-          type="submit"
-          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-        >
-          Add & Sign In
-        </button>
-      </form>
-      <h2 className="text-xl font-semibold mb-2">Saved Accounts</h2>
-      <div className="overflow-x-auto">
-        <table className="min-w-full bg-white rounded shadow">
-          <thead>
-            <tr>
-              <th className="py-2 px-4 border-b text-left">Username</th>
-              <th className="py-2 px-4 border-b text-left">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {accounts.length === 0 && (
-              <tr>
-                <td colSpan={2} className="text-gray-500 py-4 text-center">
-                  No accounts added yet.
-                </td>
-              </tr>
+
+        {activeTab === "accounts" ? (
+          // Original Account Management Interface
+          <div>
+            {/* ...existing code... */}
+
+            {/* Stats Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+              <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-600">
+                      Total Accounts
+                    </p>
+                    <p className="text-2xl font-bold text-black">
+                      {accounts.length}
+                    </p>
+                  </div>
+                  <FaInstagram className="text-3xl text-green-600" />
+                </div>
+              </div>
+              <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-600">Active</p>
+                    <p className="text-2xl font-bold text-green-600">
+                      {accounts.filter((acc) => acc.status === "active").length}
+                    </p>
+                  </div>
+                  <FaCheckCircle className="text-3xl text-green-600" />
+                </div>
+              </div>
+              <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-600">
+                      Suspended
+                    </p>
+                    <p className="text-2xl font-bold text-red-600">
+                      {
+                        accounts.filter((acc) => acc.status === "suspended")
+                          .length
+                      }
+                    </p>
+                  </div>
+                  <FaTimesCircle className="text-3xl text-red-600" />
+                </div>
+              </div>
+              <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-600">Limited</p>
+                    <p className="text-2xl font-bold text-yellow-600">
+                      {
+                        accounts.filter((acc) => acc.status === "limited")
+                          .length
+                      }
+                    </p>
+                  </div>
+                  <FaTimesCircle className="text-3xl text-yellow-600" />
+                </div>
+              </div>
+            </div>
+
+            {/* Add Account Form */}
+            {showAddForm && (
+              <div className="bg-white border border-gray-200 rounded-lg p-6 mb-8 shadow-sm">
+                <h2 className="text-xl font-semibold text-black mb-4">
+                  Add New Account
+                </h2>
+                <form
+                  onSubmit={handleAddAccount}
+                  className="grid grid-cols-1 md:grid-cols-2 gap-4"
+                >
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Username
+                    </label>
+                    <input
+                      type="text"
+                      value={newAccount.username}
+                      onChange={(e) =>
+                        setNewAccount({
+                          ...newAccount,
+                          username: e.target.value,
+                        })
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500"
+                      placeholder="@username"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Password
+                    </label>
+                    <input
+                      type="password"
+                      value={newAccount.password}
+                      onChange={(e) =>
+                        setNewAccount({
+                          ...newAccount,
+                          password: e.target.value,
+                        })
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500"
+                      placeholder="Password"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Proxy (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={newAccount.proxy}
+                      onChange={(e) =>
+                        setNewAccount({ ...newAccount, proxy: e.target.value })
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500"
+                      placeholder="proxy:port"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Daily Limit
+                    </label>
+                    <input
+                      type="number"
+                      value={newAccount.dailyLimit}
+                      onChange={(e) =>
+                        setNewAccount({
+                          ...newAccount,
+                          dailyLimit: parseInt(e.target.value),
+                        })
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500"
+                      min="1"
+                      max="100"
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Notes (Optional)
+                    </label>
+                    <textarea
+                      value={newAccount.notes}
+                      onChange={(e) =>
+                        setNewAccount({ ...newAccount, notes: e.target.value })
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500"
+                      rows="3"
+                      placeholder="Additional notes about this account..."
+                    />
+                  </div>
+                  <div className="md:col-span-2 flex gap-4">
+                    <button
+                      type="submit"
+                      className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg font-medium transition-colors"
+                    >
+                      Add Account
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddForm(false)}
+                      className="bg-gray-500 hover:bg-gray-600 text-white px-6 py-2 rounded-lg font-medium transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              </div>
             )}
-            {accounts.map((acc, idx) => (
-              <tr key={idx}>
-                <td className="py-2 px-4 border-b font-mono">{acc.username}</td>
-                <td className="py-2 px-4 border-b">
+
+            {/* Accounts Table */}
+            <div className="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+              <div className="px-6 py-4 border-b border-gray-200">
+                <h2 className="text-lg font-semibold text-black">
+                  Account List
+                </h2>
+              </div>
+
+              {accounts.length === 0 ? (
+                <div className="text-center py-12">
+                  <FaInstagram className="text-6xl text-gray-300 mx-auto mb-4" />
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">
+                    No accounts added
+                  </h3>
+                  <p className="text-gray-600 mb-4">
+                    Get started by adding your first Instagram account
+                  </p>
                   <button
-                    onClick={() => handleRemove(idx)}
-                    className="bg-red-500 text-white px-3 py-1 rounded hover:bg-red-700"
+                    onClick={() => setShowAddForm(true)}
+                    className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-medium flex items-center gap-2 mx-auto transition-colors"
                   >
-                    Remove
+                    <FaPlus className="text-sm" />
+                    Add Your First Account
                   </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Account
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Status
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Daily Limit
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Messages Sent Today
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Last Activity
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {accounts.map((account) => (
+                        <tr key={account.id} className="hover:bg-gray-50">
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="flex items-center">
+                              <FaInstagram className="text-2xl text-green-600 mr-3" />
+                              <div>
+                                <div className="text-sm font-medium text-black">
+                                  {account.username}
+                                </div>
+                                <div className="text-sm text-gray-500">
+                                  {account.proxy
+                                    ? `Proxy: ${account.proxy}`
+                                    : "No proxy"}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="flex items-center gap-2">
+                              {getStatusIcon(account.status)}
+                              <span
+                                className={`text-sm font-medium capitalize ${getStatusColor(account.status)}`}
+                              >
+                                {account.status || "active"}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-black">
+                            {account.dailyLimit || 50}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-black">
+                            {account.messagesSentToday || 0}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {account.lastActivity
+                              ? new Date(
+                                  account.lastActivity
+                                ).toLocaleDateString()
+                              : "Never"}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => setEditingAccount(account)}
+                                className="text-blue-600 hover:text-blue-800 transition-colors"
+                                title="Edit Account"
+                              >
+                                <FaEdit />
+                              </button>
+                              <button
+                                onClick={() =>
+                                  togglePasswordVisibility(account.id)
+                                }
+                                className="text-gray-600 hover:text-gray-800 transition-colors"
+                                title="Toggle Password Visibility"
+                              >
+                                {showPasswords[account.id] ? (
+                                  <FaEyeSlash />
+                                ) : (
+                                  <FaEye />
+                                )}
+                              </button>
+                              <button
+                                onClick={() => handleDeleteAccount(account.id)}
+                                className="text-red-600 hover:text-red-800 transition-colors"
+                                title="Delete Account"
+                              >
+                                <FaTrash />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Edit Modal */}
+            {editingAccount && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
+                  <h3 className="text-lg font-semibold text-black mb-4">
+                    Edit Account
+                  </h3>
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      handleUpdateAccount(editingAccount.id, editingAccount);
+                    }}
+                    className="space-y-4"
+                  >
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Username
+                      </label>
+                      <input
+                        type="text"
+                        value={editingAccount.username}
+                        onChange={(e) =>
+                          setEditingAccount({
+                            ...editingAccount,
+                            username: e.target.value,
+                          })
+                        }
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Daily Limit
+                      </label>
+                      <input
+                        type="number"
+                        value={editingAccount.dailyLimit}
+                        onChange={(e) =>
+                          setEditingAccount({
+                            ...editingAccount,
+                            dailyLimit: parseInt(e.target.value),
+                          })
+                        }
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500"
+                        min="1"
+                        max="100"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Status
+                      </label>
+                      <select
+                        value={editingAccount.status || "active"}
+                        onChange={(e) =>
+                          setEditingAccount({
+                            ...editingAccount,
+                            status: e.target.value,
+                          })
+                        }
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500"
+                      >
+                        <option value="active">Active</option>
+                        <option value="limited">Limited</option>
+                        <option value="suspended">Suspended</option>
+                      </select>
+                    </div>
+                    <div className="flex gap-4 pt-4">
+                      <button
+                        type="submit"
+                        className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg font-medium transition-colors"
+                      >
+                        Save Changes
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingAccount(null)}
+                        className="flex-1 bg-gray-500 hover:bg-gray-600 text-white py-2 rounded-lg font-medium transition-colors"
+                      >
+                        Cancel
+                      </button>{" "}
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : activeTab === "safety" ? (
+          // Safety Monitoring Interface
+          <div className="space-y-6">
+            {/* Stats Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+              <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-600">
+                      Healthy Accounts
+                    </p>
+                    <p className="text-2xl font-bold text-green-600">
+                      {
+                        safetyAccounts.filter((acc) => acc.status === "healthy")
+                          .length
+                      }
+                    </p>
+                  </div>
+                  <FaCheckCircle className="text-3xl text-green-600" />
+                </div>
+              </div>
+
+              <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-600">
+                      Warning Accounts
+                    </p>
+                    <p className="text-2xl font-bold text-yellow-600">
+                      {
+                        safetyAccounts.filter((acc) => acc.status === "warning")
+                          .length
+                      }
+                    </p>
+                  </div>
+                  <FaExclamationTriangle className="text-3xl text-yellow-600" />
+                </div>
+              </div>
+
+              <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-600">
+                      Restricted Accounts
+                    </p>
+                    <p className="text-2xl font-bold text-red-600">
+                      {
+                        safetyAccounts.filter(
+                          (acc) => acc.status === "restricted"
+                        ).length
+                      }
+                    </p>
+                  </div>
+                  <FaBan className="text-3xl text-red-600" />
+                </div>
+              </div>
+
+              <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-600">
+                      Active Proxies
+                    </p>
+                    <p className="text-2xl font-bold text-blue-600">
+                      {proxies.filter((proxy) => proxy.isActive).length}
+                    </p>
+                  </div>
+                  <FaGlobe className="text-3xl text-blue-600" />
+                </div>
+              </div>
+            </div>
+
+            {/* Account Safety Grid */}
+            <div className="bg-white border border-gray-200 rounded-lg shadow-sm">
+              <div className="px-6 py-4 border-b border-gray-200">
+                <h2 className="text-lg font-semibold text-gray-900">
+                  Account Safety Monitor
+                </h2>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Account
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Status
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Daily Usage
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Risk Score
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Proxy
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {safetyAccounts.map((account) => (
+                      <tr key={account.id} className="hover:bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex items-center">
+                            <FaInstagram className="text-pink-500 mr-3" />
+                            <div>
+                              <div className="text-sm font-medium text-gray-900">
+                                @{account.username}
+                              </div>
+                              <div className="text-sm text-gray-500">
+                                {account.email}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span
+                            className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                              account.status === "healthy"
+                                ? "bg-green-100 text-green-800"
+                                : account.status === "warning"
+                                  ? "bg-yellow-100 text-yellow-800"
+                                  : "bg-red-100 text-red-800"
+                            }`}
+                          >
+                            {account.status === "healthy" && (
+                              <FaCheckCircle className="mr-1" />
+                            )}
+                            {account.status === "warning" && (
+                              <FaExclamationTriangle className="mr-1" />
+                            )}
+                            {account.status === "restricted" && (
+                              <FaBan className="mr-1" />
+                            )}
+                            {account.status}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          <div>
+                            <div>
+                              DMs: {account.dmsToday}/{account.dailyDmLimit}
+                            </div>
+                            <div>
+                              Follows: {account.followsToday}/
+                              {account.dailyFollowLimit}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="flex items-center">
+                            <div
+                              className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium ${
+                                account.riskScore <= 3
+                                  ? "bg-green-100 text-green-800"
+                                  : account.riskScore <= 6
+                                    ? "bg-yellow-100 text-yellow-800"
+                                    : "bg-red-100 text-red-800"
+                              }`}
+                            >
+                              {account.riskScore}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          {account.proxyId ? (
+                            <span className="text-green-600">Connected</span>
+                          ) : (
+                            <span className="text-red-600">None</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                          <div className="flex space-x-2">
+                            <button
+                              onClick={() => performHealthCheck(account.id)}
+                              className="text-blue-600 hover:text-blue-900"
+                              title="Health Check"
+                            >
+                              <FaChartLine />
+                            </button>
+                            <button
+                              onClick={() =>
+                                toggleAccountRotation(
+                                  account.id,
+                                  !account.rotationEnabled
+                                )
+                              }
+                              className={`${account.rotationEnabled ? "text-green-600" : "text-gray-400"} hover:text-green-900`}
+                              title="Toggle Rotation"
+                            >
+                              <FaExchangeAlt />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        ) : activeTab === "proxies" ? (
+          // Proxies Management Interface
+          <div className="space-y-6">
+            <div className="bg-white border border-gray-200 rounded-lg shadow-sm">
+              <div className="px-6 py-4 border-b border-gray-200">
+                <h2 className="text-lg font-semibold text-gray-900">
+                  Proxy Management
+                </h2>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-6">
+                {proxies.map((proxy) => (
+                  <div
+                    key={proxy.id}
+                    className="border border-gray-200 rounded-lg p-4"
+                  >
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="font-medium text-gray-900">
+                        {proxy.host}:{proxy.port}
+                      </h3>
+                      <span
+                        className={`w-3 h-3 rounded-full ${
+                          proxy.isActive ? "bg-green-400" : "bg-red-400"
+                        }`}
+                      ></span>
+                    </div>
+
+                    <div className="space-y-2 text-sm text-gray-600">
+                      <div>Type: {proxy.type.toUpperCase()}</div>
+                      <div>Location: {proxy.location}</div>
+                      <div>Connected: {proxy.connectedAccounts} accounts</div>
+                      <div>Response: {proxy.responseTime}ms</div>
+                      <div>Success Rate: {proxy.successRate}%</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : (
+          // Rate Limits Interface
+          <div className="space-y-6">
+            <div className="bg-white border border-gray-200 rounded-lg shadow-sm">
+              <div className="px-6 py-4 border-b border-gray-200">
+                <h2 className="text-lg font-semibold text-gray-900">
+                  Rate Limit Configuration
+                </h2>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Account
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        DM Limits
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Follow Limits
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Status
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {rateLimits.map((limit) => (
+                      <tr key={limit.id} className="hover:bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm font-medium text-gray-900">
+                            @{limit.accountUsername}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          <div>
+                            {limit.dmPerHour}/hr • {limit.dmPerDay}/day
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                          <div>
+                            {limit.followPerHour}/hr • {limit.followPerDay}/day
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span
+                            className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                              limit.isActive
+                                ? "bg-green-100 text-green-800"
+                                : "bg-gray-100 text-gray-800"
+                            }`}
+                          >
+                            {limit.isActive ? "Active" : "Inactive"}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                          <button className="text-blue-600 hover:text-blue-900 mr-3">
+                            <FaEdit />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Add Proxy Modal */}
+        {showAddModal && activeTab === "proxies" && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-semibold">Add New Proxy</h3>
+                <button
+                  onClick={() => setShowAddModal(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Host
+                  </label>
+                  <input
+                    type="text"
+                    value={newProxy.host}
+                    onChange={(e) =>
+                      setNewProxy({ ...newProxy, host: e.target.value })
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                    placeholder="proxy.example.com"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Port
+                  </label>
+                  <input
+                    type="number"
+                    value={newProxy.port}
+                    onChange={(e) =>
+                      setNewProxy({ ...newProxy, port: e.target.value })
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                    placeholder="8080"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Type
+                  </label>
+                  <select
+                    value={newProxy.type}
+                    onChange={(e) =>
+                      setNewProxy({ ...newProxy, type: e.target.value })
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="http">HTTP</option>
+                    <option value="socks5">SOCKS5</option>
+                  </select>
+                </div>
+
+                <div className="flex justify-end gap-3 pt-4">
+                  <button
+                    onClick={() => setShowAddModal(false)}
+                    className="px-4 py-2 text-gray-600 hover:text-gray-800"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={addProxy}
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                  >
+                    Add Proxy
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

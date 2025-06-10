@@ -9,7 +9,7 @@ import {
   FaPlay,
   FaPause,
   FaStop,
-  FaRedo,
+  FaRepeat,
   FaSpinner,
 } from "react-icons/fa";
 
@@ -292,12 +292,12 @@ const ScheduleDM = () => {
                       checked={isRecurring}
                       onChange={(e) => setIsRecurring(e.target.checked)}
                       className="mr-3 w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
-                    />{" "}
+                    />
                     <label
                       htmlFor="recurring"
                       className="text-sm font-medium text-gray-700"
                     >
-                      <FaRedo className="inline mr-2" />
+                      <FaRepeat className="inline mr-2" />
                       Make this a recurring campaign
                     </label>
                   </div>
@@ -409,10 +409,10 @@ const ScheduleDM = () => {
                         <p>
                           <FaClock className="inline mr-1" />{" "}
                           {new Date(job.scheduled_time).toLocaleString()}
-                        </p>{" "}
+                        </p>
                         {job.is_recurring && (
                           <p>
-                            <FaRedo className="inline mr-1" /> Recurring:{" "}
+                            <FaRepeat className="inline mr-1" /> Recurring:{" "}
                             {job.recurring_interval}
                           </p>
                         )}

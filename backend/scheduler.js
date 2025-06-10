@@ -3,7 +3,7 @@ const {
   getPendingJobs,
   updateJobStatus,
   updateDMCount,
-} = require("./database");
+} = require("./database/messaging");
 const { sendDMs } = require("./sendDMs");
 const accountsStore = require("./accountsStore");
 
@@ -36,12 +36,45 @@ const processSingleMessage = async (fromUsername, targetUsername, message) => {
 
 // Process a job with multiple targets
 const processJob = async (job) => {
-  const { id, from_username, target_usernames, message_variations } = job;
+  const {
+    id,
+    from_username,
+    target_usernames,
+    message_variations,
+    schedule_time,
+  } = job;
   let targets, messages;
 
+  console.log(`\n=== Processing job #${id} ===`);
+  console.log("Job details:", {
+    scheduledFor: schedule_time,
+    currentTime: new Date().toISOString(),
+    fromUser: from_username,
+    rawTargets: target_usernames,
+    rawMessages: message_variations,
+  });
+
+  // Verify account exists and has valid cookies
+  const account = accountsStore.getAccountByUsername(from_username);
+  if (!account) {
+    console.error(`Failed to find account for username: ${from_username}`);
+    await updateJobStatus(id, "failed");
+    return 0;
+  }
+  console.log(`Found account for ${from_username}`);
+
   try {
-    targets = JSON.parse(target_usernames);
-    messages = JSON.parse(message_variations);
+    targets = Array.isArray(target_usernames)
+      ? target_usernames
+      : JSON.parse(target_usernames);
+    messages = Array.isArray(message_variations)
+      ? message_variations
+      : JSON.parse(message_variations);
+
+    console.log(`Successfully parsed job data:`, {
+      targetsCount: targets.length,
+      messagesCount: messages.length,
+    });
   } catch (error) {
     console.error(`Failed to parse job data for job #${id}:`, error);
     await updateJobStatus(id, "failed");
@@ -99,35 +132,54 @@ const processJob = async (job) => {
   } catch (error) {
     console.error(`Critical error in job #${id}:`, error);
     await updateJobStatus(id, "failed");
-    throw error;
+    return 0;
+  }
+};
+
+// Check for pending jobs every minute
+const checkPendingJobs = async () => {
+  console.log(
+    "\n--- Checking for pending jobs:",
+    new Date().toISOString(),
+    "---"
+  );
+  try {
+    const pendingJobs = await getPendingJobs();
+    console.log(`Found ${pendingJobs.length} pending jobs`);
+
+    for (const job of pendingJobs) {
+      console.log("\nProcessing scheduled job:", {
+        id: job.id,
+        scheduledTime: job.schedule_time,
+        fromUsername: job.from_username,
+        targetCount: Array.isArray(job.target_usernames)
+          ? job.target_usernames.length
+          : JSON.parse(job.target_usernames || "[]").length,
+      });
+
+      try {
+        await processJob(job);
+      } catch (jobError) {
+        console.error(`Failed to process job ${job.id}:`, jobError);
+        await updateJobStatus(job.id, "failed");
+      }
+    }
+  } catch (error) {
+    console.error("Error processing scheduled jobs:", error);
   }
 };
 
 // Initialize the scheduler
 const initializeScheduler = () => {
-  console.log("DM Scheduler initialized...");
-  // Check for pending jobs every minute
-  cron.schedule("* * * * *", async () => {
-    try {
-      console.log("Checking for pending jobs...");
-      const pendingJobs = await getPendingJobs();
+  console.log("Initializing DM scheduler...");
 
-      if (pendingJobs.length > 0) {
-        console.log(`Found ${pendingJobs.length} jobs to process`);
-        for (const job of pendingJobs) {
-          console.log(`Processing job #${job.id} for ${job.from_username}`);
-          try {
-            await processJob(job);
-            console.log(`Successfully processed job #${job.id}`);
-          } catch (jobError) {
-            console.error(`Failed to process job #${job.id}:`, jobError);
-          }
-        }
-      }
-    } catch (error) {
-      console.error("Error processing scheduled jobs:", error);
-    }
-  });
+  // Run every minute
+  cron.schedule("* * * * *", checkPendingJobs);
+
+  // Run immediately on startup
+  checkPendingJobs();
+
+  console.log("Scheduler initialized successfully");
 };
 
 module.exports = {
