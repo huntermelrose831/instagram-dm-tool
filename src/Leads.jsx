@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   FaSearch,
   FaUsers,
@@ -11,16 +11,6 @@ import {
   FaUserPlus,
   FaMapMarkerAlt,
   FaFilter,
-  FaPlay,
-  FaPause,
-  FaStop,
-  FaCog,
-  FaChartLine,
-  FaEye,
-  FaHeart,
-  FaComment,
-  FaRocket,
-  FaSave,
   FaTrash,
   FaCrosshairs,
 } from "react-icons/fa";
@@ -38,32 +28,12 @@ const Leads = () => {
   const [success, setSuccess] = useState("");
   const [addedLeads, setAddedLeads] = useState(new Set());
 
-  // Advanced Targeting functionality
-  const [scrapingJobs, setScrapingJobs] = useState([]);
-  const [targetingRules, setTargetingRules] = useState([]);
-  const [scrapedLeads, setScrapedLeads] = useState([]);
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [showFiltersModal, setShowFiltersModal] = useState(false);
+  // Advanced Targeting functionality - now Targets functionality
+  const [targets, setTargets] = useState([]);
+  const [newTarget, setNewTarget] = useState("");
+  const [bulkTargets, setBulkTargets] = useState("");
+  const [targetSearchTerm, setTargetSearchTerm] = useState("");
 
-  // Form states for advanced targeting
-  const [newScrapingJob, setNewScrapingJob] = useState({
-    name: "",
-    type: "competitor-followers",
-    targets: [],
-    filters: {
-      followerCount: { min: 100, max: 100000 },
-      followingCount: { min: 50, max: 5000 },
-      postsCount: { min: 10, max: null },
-      engagementRate: { min: 1, max: null },
-      location: "",
-      language: "en",
-      hasProfilePic: true,
-      hasWebsite: false,
-      isVerified: false,
-    },
-    maxLeads: 1000,
-    isActive: false,
-  });
   const searchTypes = [
     { value: "posts", label: "Instagram Posts", icon: FaInstagram },
     { value: "accounts", label: "Profile Followers", icon: FaUsers },
@@ -74,49 +44,141 @@ const Leads = () => {
   // Initialize data on component mount
   useEffect(() => {
     if (activeTab === "advanced") {
-      fetchScrapingJobs();
-      fetchTargetingRules();
-      fetchScrapedLeads();
+      fetchTargets();
     }
   }, [activeTab]);
 
-  // Advanced targeting API functions
-  const fetchScrapingJobs = async () => {
+  // Memoized input handlers to prevent re-rendering issues
+  const handleSearchTypeChange = useCallback((value) => {
+    setSearchType(value);
+  }, []);
+
+  const handleSearchInputChange = useCallback((value) => {
+    setSearchInput(value);
+  }, []);
+
+  const handleNewTargetChange = useCallback((value) => {
+    setNewTarget(value);
+  }, []);
+
+  const handleBulkTargetsChange = useCallback((value) => {
+    setBulkTargets(value);
+  }, []);
+
+  const handleTargetSearchTermChange = useCallback((value) => {
+    setTargetSearchTerm(value);
+  }, []);
+
+  // Targets functionality
+  const fetchTargets = async () => {
+    try {
+      const response = await fetch("http://localhost:5000/api/targets");
+      if (response.ok) {
+        const data = await response.json();
+        setTargets(data.targets || []);
+      }
+    } catch (error) {
+      console.error("Error fetching targets:", error);
+    }
+  };
+
+  const addTarget = async (username) => {
+    if (!username.trim()) return;
+    setLoading(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const response = await fetch("http://localhost:5000/api/targets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: username.trim() }),
+      });
+
+      const data = await response.json();
+      if (data.status === "success") {
+        setTargets(data.targets);
+        setSuccess("Target added successfully!");
+        setNewTarget("");
+        setTimeout(() => setSuccess(""), 3000);
+      } else {
+        setError(data.message || "Failed to add target");
+      }
+    } catch (error) {
+      setError("Network error: " + error.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const addBulkTargets = async () => {
+    if (!bulkTargets.trim()) return;
+    setLoading(true);
+    setError("");
+    setSuccess("");
+
+    const targetList = bulkTargets
+      .split(/[,\n]/)
+      .map((u) => u.trim())
+      .filter(Boolean);
+
+    try {
+      for (const username of targetList) {
+        await addTarget(username);
+      }
+      setBulkTargets("");
+      setSuccess(`Added ${targetList.length} targets successfully!`);
+    } catch (error) {
+      setError("Error adding bulk targets");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const removeTarget = async (username) => {
+    setLoading(true);
     try {
       const response = await fetch(
-        "http://localhost:5000/api/targeting/scraping-jobs"
+        `http://localhost:5000/api/targets/${username}`,
+        {
+          method: "DELETE",
+        }
       );
-      if (response.ok) {
-        const data = await response.json();
-        setScrapingJobs(data.jobs || []);
+
+      const data = await response.json();
+      if (data.status === "success") {
+        setTargets(data.targets);
+        setSuccess("Target removed successfully!");
+        setTimeout(() => setSuccess(""), 3000);
       }
     } catch (error) {
-      console.error("Error fetching scraping jobs:", error);
+      setError("Failed to remove target");
+    } finally {
+      setLoading(false);
     }
   };
 
-  const fetchTargetingRules = async () => {
-    try {
-      const response = await fetch("http://localhost:5000/api/targeting/rules");
-      if (response.ok) {
-        const data = await response.json();
-        setTargetingRules(data.rules || []);
-      }
-    } catch (error) {
-      console.error("Error fetching targeting rules:", error);
-    }
+  const exportTargets = () => {
+    const dataStr = JSON.stringify(targets, null, 2);
+    const dataBlob = new Blob([dataStr], { type: "application/json" });
+    const url = URL.createObjectURL(dataBlob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "targets.json";
+    link.click();
   };
 
-  const fetchScrapedLeads = async () => {
-    try {
-      const response = await fetch("http://localhost:5000/api/targeting/leads");
-      if (response.ok) {
-        const data = await response.json();
-        setScrapedLeads(data.leads || []);
-      }
-    } catch (error) {
-      console.error("Error fetching scraped leads:", error);
-    }
+  const copyAllTargets = () => {
+    const targetsText = targets.map((target) => `@${target}`).join("\n");
+    navigator.clipboard
+      .writeText(targetsText)
+      .then(() => {
+        setSuccess("All targets copied to clipboard!");
+        setTimeout(() => setSuccess(""), 3000);
+      })
+      .catch(() => {
+        setError("Failed to copy targets to clipboard");
+      });
   };
 
   const createScrapingJob = async () => {
@@ -363,7 +425,7 @@ const Leads = () => {
               }`}
             >
               <FaCrosshairs className="inline mr-2" />
-              Advanced Targeting
+              Targets
             </button>
           </div>
         </div>
@@ -400,7 +462,9 @@ const Leads = () => {
                             name="searchType"
                             value={type.value}
                             checked={searchType === type.value}
-                            onChange={(e) => setSearchType(e.target.value)}
+                            onChange={(e) =>
+                              handleSearchTypeChange(e.target.value)
+                            }
                             className="sr-only"
                           />
                           <Icon
@@ -427,7 +491,9 @@ const Leads = () => {
                       <input
                         type="text"
                         value={searchInput}
-                        onChange={(e) => setSearchInput(e.target.value)}
+                        onChange={(e) =>
+                          handleSearchInputChange(e.target.value)
+                        }
                         placeholder={
                           searchType === "posts"
                             ? "https://instagram.com/p/..."
@@ -555,312 +621,175 @@ const Leads = () => {
               </div>
             </div>
           ) : (
-            // Advanced Targeting Interface
-            <div className="space-y-6">
+            // Targets Management Interface
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               {/* Status Messages */}
               {success && (
-                <div className="bg-green-100 border border-green-300 text-green-800 px-4 py-3 rounded-lg">
+                <div className="lg:col-span-3 bg-green-100 border border-green-300 text-green-800 px-4 py-3 rounded-lg">
                   {success}
                 </div>
               )}
 
               {error && (
-                <div className="bg-red-100 border border-red-300 text-red-800 px-4 py-3 rounded-lg">
+                <div className="lg:col-span-3 bg-red-100 border border-red-300 text-red-800 px-4 py-3 rounded-lg">
                   {error}
                 </div>
               )}
 
-              {/* Action Buttons */}
-              <div className="flex justify-between items-center">
-                <div className="flex gap-4">
-                  <button
-                    onClick={() => setShowCreateModal(true)}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                  >
-                    <FaPlus />
-                    Create Scraping Job
-                  </button>
-
-                  <button
-                    onClick={() => exportLeads("advanced", "csv")}
-                    className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                  >
-                    <FaDownload />
-                    Export Leads
-                  </button>
-                </div>
-
-                <div className="text-sm text-gray-600">
-                  {scrapedLeads.length} scraped leads •{" "}
-                  {scrapingJobs.filter((j) => j.isActive).length} active jobs
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Scraping Jobs */}
-                <div className="space-y-4">
-                  <h2 className="text-xl font-semibold text-gray-900 flex items-center">
-                    <FaRocket className="mr-2 text-blue-600" />
-                    Scraping Jobs ({scrapingJobs.length})
+              {/* Add Targets Section */}
+              <div className="lg:col-span-1 space-y-6">
+                {/* Single Target */}
+                <div className="bg-white border border-gray-200 rounded-lg p-6">
+                  <h2 className="text-xl font-semibold text-black mb-4 flex items-center">
+                    <FaUserPlus className="mr-2 text-green-600" />
+                    Add Single Target
                   </h2>
-
-                  <div className="space-y-3 max-h-96 overflow-y-auto">
-                    {scrapingJobs.length === 0 ? (
-                      <div className="text-center py-8 text-gray-500">
-                        <FaRocket className="mx-auto text-3xl mb-3" />
-                        <p>No scraping jobs yet</p>
-                        <p className="text-sm">
-                          Create your first job to start collecting leads
-                          automatically
-                        </p>
-                      </div>
-                    ) : (
-                      scrapingJobs.map((job) => (
-                        <div
-                          key={job.id}
-                          className="bg-white rounded-lg border border-gray-200 p-4 shadow-sm"
-                        >
-                          <div className="flex items-start justify-between mb-3">
-                            <div>
-                              <h3 className="font-semibold text-gray-900 mb-1">
-                                {job.name}
-                              </h3>
-                              <p className="text-sm text-gray-600 capitalize">
-                                {job.type.replace("-", " ")}
-                              </p>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <button
-                                onClick={() =>
-                                  toggleScrapingJob(job.id, job.isActive)
-                                }
-                                className={`p-2 rounded-lg transition-colors ${
-                                  job.isActive
-                                    ? "bg-green-100 text-green-600 hover:bg-green-200"
-                                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                                }`}
-                              >
-                                {job.isActive ? <FaPause /> : <FaPlay />}
-                              </button>
-                            </div>
-                          </div>
-
-                          <div className="grid grid-cols-2 gap-4 text-sm">
-                            <div>
-                              <span className="text-gray-600">Progress:</span>
-                              <div className="flex items-center gap-2">
-                                <div className="flex-1 bg-gray-200 rounded-full h-2">
-                                  <div
-                                    className="bg-blue-600 h-2 rounded-full"
-                                    style={{
-                                      width: `${(job.leadsFound / job.maxLeads) * 100}%`,
-                                    }}
-                                  ></div>
-                                </div>
-                                <span className="text-xs">
-                                  {job.leadsFound}/{job.maxLeads}
-                                </span>
-                              </div>
-                            </div>
-                            <div>
-                              <span className="text-gray-600">
-                                Success Rate:
-                              </span>
-                              <span className="font-medium text-green-600 ml-1">
-                                {job.successRate}%
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="mt-3 text-xs text-gray-500">
-                            Last run:{" "}
-                            {new Date(job.lastRun).toLocaleDateString()}
-                          </div>
-                        </div>
-                      ))
-                    )}
+                  <div className="flex space-x-2">
+                    <input
+                      type="text"
+                      value={newTarget}
+                      onChange={(e) => handleNewTargetChange(e.target.value)}
+                      placeholder="Enter username"
+                      className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:border-green-500 focus:ring-2 focus:ring-green-200 text-black"
+                      onKeyPress={(e) =>
+                        e.key === "Enter" && addTarget(newTarget)
+                      }
+                    />
+                    <button
+                      onClick={() => addTarget(newTarget)}
+                      disabled={loading}
+                      className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white px-4 py-3 rounded-lg transition-colors"
+                    >
+                      <FaPlus />
+                    </button>
                   </div>
                 </div>
 
-                {/* Scraped Leads */}
-                <div className="space-y-4">
-                  <h2 className="text-xl font-semibold text-gray-900 flex items-center">
+                {/* Bulk Add */}
+                <div className="bg-white border border-gray-200 rounded-lg p-6">
+                  <h2 className="text-xl font-semibold text-black mb-4 flex items-center">
                     <FaUsers className="mr-2 text-purple-600" />
-                    Scraped Leads ({scrapedLeads.length})
+                    Bulk Add Targets
                   </h2>
+                  <textarea
+                    value={bulkTargets}
+                    onChange={(e) => handleBulkTargetsChange(e.target.value)}
+                    placeholder="Enter usernames separated by commas or new lines"
+                    rows={4}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:border-green-500 focus:ring-2 focus:ring-green-200 text-black mb-4"
+                  />
+                  <button
+                    onClick={addBulkTargets}
+                    disabled={loading || !bulkTargets.trim()}
+                    className="w-full bg-purple-600 hover:bg-purple-700 disabled:bg-gray-400 text-white px-4 py-3 rounded-lg transition-colors"
+                  >
+                    Add All Targets
+                  </button>
+                </div>
 
-                  <div className="space-y-3 max-h-96 overflow-y-auto">
-                    {scrapedLeads.length === 0 ? (
-                      <div className="text-center py-8 text-gray-500">
-                        <FaUsers className="mx-auto text-3xl mb-3" />
-                        <p>No leads found yet</p>
-                        <p className="text-sm">
-                          Start a scraping job to collect leads
-                        </p>
+                {/* Actions */}
+                <div className="bg-white border border-gray-200 rounded-lg p-6">
+                  <h2 className="text-xl font-semibold text-black mb-4 flex items-center">
+                    <FaDownload className="mr-2 text-indigo-600" />
+                    Actions
+                  </h2>
+                  <div className="space-y-3">
+                    <button
+                      onClick={copyAllTargets}
+                      className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-3 rounded-lg transition-colors flex items-center justify-center"
+                    >
+                      <FaCrosshairs className="mr-2" />
+                      Copy All Targets
+                    </button>
+                    <button
+                      onClick={exportTargets}
+                      className="w-full bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-3 rounded-lg transition-colors flex items-center justify-center"
+                    >
+                      <FaDownload className="mr-2" />
+                      Export JSON
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Targets List */}
+              <div className="lg:col-span-2">
+                <div className="bg-white border border-gray-200 rounded-lg p-6">
+                  <div className="flex items-center justify-between mb-6">
+                    <h2 className="text-xl font-semibold text-black flex items-center">
+                      <FaUsers className="mr-2 text-blue-600" />
+                      Target List (
+                      {
+                        targets.filter((target) =>
+                          target
+                            .toLowerCase()
+                            .includes(targetSearchTerm.toLowerCase())
+                        ).length
+                      }
+                      )
+                    </h2>
+
+                    <div className="flex items-center space-x-4">
+                      <div className="relative">
+                        <FaSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                        <input
+                          type="text"
+                          value={targetSearchTerm}
+                          onChange={(e) =>
+                            handleTargetSearchTermChange(e.target.value)
+                          }
+                          placeholder="Search targets..."
+                          className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-green-500 text-black"
+                        />
                       </div>
-                    ) : (
-                      scrapedLeads.map((lead) => (
-                        <div
-                          key={lead.id}
-                          className="bg-white rounded-lg border border-gray-200 p-4 shadow-sm"
-                        >
-                          <div className="flex items-start justify-between">
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2 mb-2">
-                                <h3 className="font-semibold text-gray-900">
-                                  @{lead.username}
-                                </h3>
-                                {lead.isVerified && (
-                                  <span className="text-blue-500 text-xs">
-                                    ✓
-                                  </span>
-                                )}
-                              </div>
-                              <p className="text-sm text-gray-600 mb-2">
-                                {lead.fullName}
-                              </p>
+                    </div>
+                  </div>
 
-                              <div className="grid grid-cols-2 gap-2 text-xs text-gray-500">
-                                <div>
-                                  👥 {lead.followers?.toLocaleString()}{" "}
-                                  followers
-                                </div>
-                                <div>📍 {lead.location}</div>
-                                <div>📊 {lead.engagementRate}% engagement</div>
-                                <div>📝 {lead.posts} posts</div>
-                              </div>
-
-                              {lead.tags && lead.tags.length > 0 && (
-                                <div className="flex flex-wrap gap-1 mt-2">
-                                  {lead.tags.map((tag, index) => (
-                                    <span
-                                      key={index}
-                                      className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded"
-                                    >
-                                      {tag}
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-
+                  {/* Targets Grid */}
+                  {targets.filter((target) =>
+                    target
+                      .toLowerCase()
+                      .includes(targetSearchTerm.toLowerCase())
+                  ).length === 0 ? (
+                    <div className="text-center py-12 text-gray-500">
+                      <FaUsers className="mx-auto text-4xl mb-4" />
+                      <p className="text-lg">No targets found</p>
+                      <p className="text-sm">
+                        Add some usernames to get started
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-96 overflow-y-auto">
+                      {targets
+                        .filter((target) =>
+                          target
+                            .toLowerCase()
+                            .includes(targetSearchTerm.toLowerCase())
+                        )
+                        .map((target, index) => (
+                          <div
+                            key={index}
+                            className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg p-3 hover:bg-gray-100 transition-colors"
+                          >
+                            <span className="text-black font-medium">
+                              @{target}
+                            </span>
                             <button
-                              onClick={() => addToTargets(lead.username)}
-                              disabled={addedLeads.has(lead.username)}
-                              className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
-                                addedLeads.has(lead.username)
-                                  ? "bg-green-100 text-green-600 cursor-not-allowed"
-                                  : "bg-purple-100 text-purple-600 hover:bg-purple-200"
-                              }`}
+                              onClick={() => removeTarget(target)}
+                              className="text-red-500 hover:text-red-700 p-1 transition-colors"
                             >
-                              {addedLeads.has(lead.username) ? "Added" : "Add"}
+                              <FaTrash />
                             </button>
                           </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
+                        ))}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
-          )}
+          )}{" "}
         </div>
       </div>
-
-      {/* Create Scraping Job Modal */}
-      {showCreateModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-lg font-semibold">Create New Scraping Job</h3>
-              <button
-                onClick={() => setShowCreateModal(false)}
-                className="text-gray-400 hover:text-gray-600"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Job Name
-                </label>
-                <input
-                  type="text"
-                  value={newScrapingJob.name}
-                  onChange={(e) =>
-                    setNewScrapingJob({
-                      ...newScrapingJob,
-                      name: e.target.value,
-                    })
-                  }
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
-                  placeholder="Enter job name..."
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Scraping Type
-                </label>
-                <select
-                  value={newScrapingJob.type}
-                  onChange={(e) =>
-                    setNewScrapingJob({
-                      ...newScrapingJob,
-                      type: e.target.value,
-                    })
-                  }
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
-                >
-                  <option value="competitor-followers">
-                    Competitor Followers
-                  </option>
-                  <option value="hashtag-users">Hashtag Users</option>
-                  <option value="post-engagers">Post Engagers</option>
-                  <option value="location-based">Location Based</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Max Leads
-                </label>
-                <input
-                  type="number"
-                  value={newScrapingJob.maxLeads}
-                  onChange={(e) =>
-                    setNewScrapingJob({
-                      ...newScrapingJob,
-                      maxLeads: parseInt(e.target.value),
-                    })
-                  }
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
-                  min="100"
-                  max="10000"
-                />
-              </div>
-
-              <div className="flex justify-end gap-3 pt-4">
-                <button
-                  onClick={() => setShowCreateModal(false)}
-                  className="px-4 py-2 text-gray-600 hover:text-gray-800"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={createScrapingJob}
-                  disabled={loading || !newScrapingJob.name}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-400 transition-colors"
-                >
-                  {loading ? "Creating..." : "Create Job"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

@@ -5,7 +5,6 @@ import {
   MdCampaign,
   MdSchedule,
   MdDashboard,
-  MdInbox,
   MdSecurity,
   MdPsychology,
   MdAssessment,
@@ -26,7 +25,6 @@ const Navbar = () => {
   const navigationItems = [
     { path: "/", icon: MdDashboard, text: "Dashboard", size: 24 },
     { path: "/messaging", icon: MdSendToMobile, text: "Messaging", size: 24 },
-    { path: "/inbox", icon: MdInbox, text: "Inbox", size: 24 },
     { path: "/leads", icon: FaCompass, text: "Leads & Targeting", size: 22 },
     {
       path: "/accounts",

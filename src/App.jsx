@@ -13,7 +13,6 @@ import Accounts from "./Accounts";
 import Campaigns from "./Campaigns";
 import CRM from "./CRM";
 import Analytics from "./Analytics";
-import InboxNew from "./InboxNew";
 import SmartAutomation from "./SmartAutomation";
 import ReportingExport from "./ReportingExport";
 import TeamCollaboration from "./TeamCollaboration";
@@ -35,7 +34,6 @@ function App() {
             <Route path="/campaigns" element={<Campaigns />} />
             <Route path="/crm" element={<CRM />} />
             <Route path="/analytics" element={<Analytics />} />
-            <Route path="/inbox" element={<InboxNew />} />
             <Route path="/automation" element={<SmartAutomation />} />
             <Route
               path="/safety"

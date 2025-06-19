@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useLocation } from "react-router-dom";
 import {
   FaEnvelope,
@@ -18,6 +18,24 @@ import {
   FaToggleOff,
 } from "react-icons/fa";
 
+/**
+ * TIMEZONE FIX: Formats a Date object into datetime-local format
+ * Uses local timezone consistently to match backend expectations
+ */
+function formatLocalDateTime(date = new Date()) {
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1; // 0-indexed, so add 1
+  const day = date.getDate();
+  const hours = date.getHours();
+  const minutes = date.getMinutes();
+
+  // Pad with zeros for consistent formatting
+  const pad = (num) => String(num).padStart(2, "0");
+
+  // Return in the exact format datetime-local expects
+  return `${year}-${pad(month)}-${pad(day)}T${pad(hours)}:${pad(minutes)}`;
+}
+
 const Messaging = () => {
   const location = useLocation();
 
@@ -26,10 +44,13 @@ const Messaging = () => {
   const [selectedAccount, setSelectedAccount] = useState("");
   const [targets, setTargets] = useState("");
   const [messages, setMessages] = useState([""]);
-
-  // State for scheduling
+  // State for scheduling - TIMEZONE FIX: Use local time string format
   const [isScheduled, setIsScheduled] = useState(false);
-  const [scheduleTime, setScheduleTime] = useState(new Date());
+  const [scheduleTime, setScheduleTime] = useState(() => {
+    // Initialize with current local time + 30 minutes
+    const future = new Date(Date.now() + 30 * 60 * 1000);
+    return formatLocalDateTime(future);
+  });
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurringInterval, setRecurringInterval] = useState("daily");
 
@@ -90,12 +111,13 @@ const Messaging = () => {
   const addMessageVariation = () => {
     setMessages([...messages, ""]);
   };
-
-  const updateMessage = (index, value) => {
-    const newMessages = [...messages];
-    newMessages[index] = value;
-    setMessages(newMessages);
-  };
+  const updateMessage = useCallback((index, value) => {
+    setMessages((prev) => {
+      const newMessages = [...prev];
+      newMessages[index] = value;
+      return newMessages;
+    });
+  }, []);
 
   const removeMessage = (index) => {
     if (messages.length > 1) {
@@ -170,15 +192,14 @@ const Messaging = () => {
       ) {
         throw new Error("Please fill in all required fields");
       }
-
-      const response = await fetch("/api/schedule-dm", {
+      const response = await fetch("/api/schedule-dms", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          account: selectedAccount,
-          targets: targetsList,
-          messages: validMessages,
-          scheduleTime: scheduleTime.toISOString(),
+          fromUsername: selectedAccount,
+          targetUsernames: targetsList,
+          messageVariations: validMessages,
+          scheduleTime: scheduleTime, // Send as local time string, not ISO
           isRecurring,
           recurringInterval: isRecurring ? recurringInterval : null,
         }),
@@ -189,7 +210,9 @@ const Messaging = () => {
         setStatus("✅ DM scheduled successfully!");
         setTargets("");
         setMessages([""]);
-        setScheduleTime(new Date());
+        setScheduleTime(
+          formatLocalDateTime(new Date(Date.now() + 30 * 60 * 1000))
+        );
         fetchScheduledJobs();
       } else {
         setError(result.message || "Failed to schedule DM");
@@ -200,7 +223,6 @@ const Messaging = () => {
       setLoading(false);
     }
   };
-
   const cancelJob = async (jobId) => {
     try {
       const response = await fetch(`/api/scheduled-jobs/${jobId}`, {
@@ -213,6 +235,32 @@ const Messaging = () => {
       }
     } catch (error) {
       setError("Failed to cancel job");
+    }
+  };
+  const deleteJob = async (jobId) => {
+    // Add confirmation dialog
+    if (
+      !window.confirm(
+        "Are you sure you want to delete this job? This action cannot be undone."
+      )
+    ) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/scheduled-jobs/${jobId}/delete`, {
+        method: "DELETE",
+      });
+
+      if (response.ok) {
+        setStatus("Job deleted successfully");
+        fetchScheduledJobs();
+      } else {
+        const errorData = await response.json();
+        setError(errorData.message || "Failed to delete job");
+      }
+    } catch (error) {
+      setError("Failed to delete job");
     }
   };
 
@@ -397,16 +445,31 @@ const Messaging = () => {
                         <label className="block text-sm font-medium text-gray-700 mb-2">
                           <FaClock className="inline mr-2" />
                           Schedule Time
-                        </label>
+                        </label>{" "}
                         <input
                           type="datetime-local"
-                          value={scheduleTime.toISOString().slice(0, 16)}
-                          onChange={(e) =>
-                            setScheduleTime(new Date(e.target.value))
-                          }
-                          min={new Date().toISOString().slice(0, 16)}
+                          value={scheduleTime}
+                          onChange={(e) => setScheduleTime(e.target.value)}
+                          min={formatLocalDateTime(new Date())}
                           className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 text-black"
+                          autoComplete="off"
                         />
+                        {/* Timezone Debugging Panel */}
+                        <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded text-xs">
+                          <p className="font-semibold text-blue-700 mb-2">
+                            The message will be sent at the following time:
+                          </p>
+                          <div className="space-y-1 text-gray-700">
+                            {scheduleTime && (
+                              <p className="text-indigo-600 font-medium">
+                                {" "}
+                                {new Date(
+                                  scheduleTime.replace("T", " ")
+                                ).toLocaleString()}
+                              </p>
+                            )}
+                          </div>
+                        </div>
                       </div>
 
                       <div>
@@ -476,7 +539,7 @@ const Messaging = () => {
                         ) : (
                           <>
                             <FaCalendarAlt className="mr-2" />
-                            Schedule Campaign
+                            Schedule DM
                           </>
                         )}
                       </>
@@ -522,10 +585,11 @@ const Messaging = () => {
                         key={job.id || index}
                         className="border border-gray-200 rounded-lg p-3 hover:bg-gray-50 transition-colors"
                       >
+                        {" "}
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center">
                             <span className="font-medium text-black text-sm">
-                              @{job.account}
+                              @{job.from_username}
                             </span>
                             <span
                               className={`ml-2 px-2 py-1 rounded-full text-xs border ${getJobStatusColor(
@@ -535,27 +599,53 @@ const Messaging = () => {
                               {job.status?.charAt(0).toUpperCase() +
                                 job.status?.slice(1)}
                             </span>
+                          </div>{" "}
+                          <div className="flex items-center space-x-1">
+                            {job.status === "pending" && (
+                              <button
+                                onClick={() => cancelJob(job.id)}
+                                className="text-orange-500 hover:text-red-700 p-1 transition-colors"
+                                title="Cancel Job"
+                              >
+                                <FaStop size={12} />
+                              </button>
+                            )}
+
+                            {job.status === "running" && (
+                              <div
+                                className="text-blue-500 p-1"
+                                title="Job is currently running"
+                              >
+                                <FaSpinner size={12} className="animate-spin" />
+                              </div>
+                            )}
+
+                            {(job.status === "failed" ||
+                              job.status === "completed" ||
+                              job.status === "cancelled") && (
+                              <button
+                                onClick={() => deleteJob(job.id)}
+                                className="text-gray-400 hover:text-red-600 p-1 transition-colors"
+                                title={`Delete ${job.status} job`}
+                              >
+                                <FaTrash size={12} />
+                              </button>
+                            )}
                           </div>
-
-                          {job.status === "pending" && (
-                            <button
-                              onClick={() => cancelJob(job.id)}
-                              className="text-red-500 hover:text-red-700 p-1 transition-colors"
-                              title="Cancel Job"
-                            >
-                              <FaStop size={12} />
-                            </button>
-                          )}
                         </div>
-
                         <div className="text-xs text-gray-600 space-y-1">
                           <p>
                             <FaUsers className="inline mr-1" />
-                            {job.target_count || 0} targets
+                            {
+                              JSON.parse(job.target_usernames || "[]").length
+                            }{" "}
+                            targets
                           </p>
                           <p>
                             <FaClock className="inline mr-1" />
-                            {new Date(job.scheduled_time).toLocaleString()}
+                            {new Date(
+                              job.schedule_time.replace(" ", "T")
+                            ).toLocaleString()}
                           </p>
                           {job.is_recurring && (
                             <p>
@@ -588,7 +678,7 @@ const Messaging = () => {
                           .length
                       }
                     </span>
-                  </div>
+                  </div>{" "}
                   <div className="flex justify-between">
                     <span className="text-gray-600">Completed Jobs:</span>
                     <span className="font-medium text-green-600">
@@ -596,6 +686,15 @@ const Messaging = () => {
                         scheduledJobs.filter(
                           (job) => job.status === "completed"
                         ).length
+                      }
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Failed Jobs:</span>
+                    <span className="font-medium text-red-600">
+                      {
+                        scheduledJobs.filter((job) => job.status === "failed")
+                          .length
                       }
                     </span>
                   </div>

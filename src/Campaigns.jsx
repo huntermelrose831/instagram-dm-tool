@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import {
   MdAdd,
@@ -156,17 +156,16 @@ const Campaigns = () => {
       console.error("Error fetching replies:", error);
     }
   };
-
-  const updateCampaignField = (field, value) => {
-    if (editingCampaign) {
-      setEditingCampaign({
-        ...editingCampaign,
+  const updateCampaignField = useCallback((field, value) => {
+    setEditingCampaign((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
         [field]: value,
-      });
-    }
-  };
-
-  const saveCampaignChanges = async () => {
+      };
+    });
+  }, []);
+  const saveCampaignChanges = useCallback(async () => {
     if (!editingCampaign) return;
 
     try {
@@ -181,17 +180,24 @@ const Campaigns = () => {
 
       if (response.ok) {
         // Update local state
-        setCampaigns(
-          campaigns.map((c) =>
-            c.id === editingCampaign.id ? editingCampaign : c
-          )
+        setCampaigns((prev) =>
+          prev.map((c) => (c.id === editingCampaign.id ? editingCampaign : c))
         );
         setSelectedCampaign(editingCampaign);
       }
     } catch (error) {
       console.error("Error updating campaign:", error);
     }
-  };
+  }, [editingCampaign]);
+
+  // Memoized handlers for new campaign form
+  const handleNewCampaignChange = useCallback((field, value) => {
+    setNewCampaign((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  }, []);
+
   const createCampaign = async () => {
     if (!newCampaign.name.trim()) return;
 
@@ -946,13 +952,11 @@ const Campaigns = () => {
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-2">
               Campaign Name *
-            </label>
+            </label>{" "}
             <input
               type="text"
               value={newCampaign.name}
-              onChange={(e) =>
-                setNewCampaign({ ...newCampaign, name: e.target.value })
-              }
+              onChange={(e) => handleNewCampaignChange("name", e.target.value)}
               className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white focus:border-green-500 focus:outline-none"
               placeholder="Enter campaign name"
               autoFocus
@@ -966,10 +970,7 @@ const Campaigns = () => {
             <select
               value={newCampaign.account_username}
               onChange={(e) =>
-                setNewCampaign({
-                  ...newCampaign,
-                  account_username: e.target.value,
-                })
+                handleNewCampaignChange("account_username", e.target.value)
               }
               className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white focus:border-green-500 focus:outline-none"
             >
@@ -985,15 +986,12 @@ const Campaigns = () => {
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-2">
               Daily Limit
-            </label>
+            </label>{" "}
             <input
               type="number"
               value={newCampaign.daily_limit}
               onChange={(e) =>
-                setNewCampaign({
-                  ...newCampaign,
-                  daily_limit: parseInt(e.target.value),
-                })
+                handleNewCampaignChange("daily_limit", parseInt(e.target.value))
               }
               className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white focus:border-green-500 focus:outline-none"
               min="1"

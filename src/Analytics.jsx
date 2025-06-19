@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   FaChartLine,
   FaUsers,
@@ -24,6 +24,7 @@ import {
   Pie,
   Cell,
 } from "recharts";
+// ...existing code...
 
 const Analytics = () => {
   const [timeRange, setTimeRange] = useState("7d");
@@ -39,10 +40,19 @@ const Analytics = () => {
     accountStats: [],
     campaignStats: [],
   });
-
   useEffect(() => {
     fetchAnalytics();
   }, [timeRange]);
+
+  // Memoized input handlers
+  const handleTimeRangeChange = useCallback((value) => {
+    setTimeRange(value);
+  }, []);
+
+  const handleSelectedMetricChange = useCallback((value) => {
+    setSelectedMetric(value);
+  }, []);
+
   const fetchAnalytics = async () => {
     try {
       const response = await fetch(
@@ -138,7 +148,7 @@ const Analytics = () => {
           <div className="flex flex-col sm:flex-row gap-4 mt-4 sm:mt-0">
             <select
               value={timeRange}
-              onChange={(e) => setTimeRange(e.target.value)}
+              onChange={(e) => handleTimeRangeChange(e.target.value)}
               className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             >
               <option value="7d">Last 7 days</option>
@@ -214,7 +224,7 @@ const Analytics = () => {
               </h3>
               <select
                 value={selectedMetric}
-                onChange={(e) => setSelectedMetric(e.target.value)}
+                onChange={(e) => handleSelectedMetricChange(e.target.value)}
                 className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
                 <option value="messages">Messages Sent</option>

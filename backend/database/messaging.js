@@ -16,18 +16,59 @@ function addScheduledJob({
     scheduleTime,
     isRecurring,
   });
-  // Convert schedule time to a proper datetime and format it for SQLite
-  const scheduleDate = new Date(scheduleTime);
-  console.log("Schedule time details:", {
-    original: scheduleTime,
-    parsed: scheduleDate.toISOString(),
-    local: scheduleDate.toLocaleString(),
-  });
+  // BULLETPROOF TIMEZONE FIX: Parse and store as local time, never convert to UTC
+  let scheduleDate;
+  let sqliteDateTime;
 
+  if (typeof scheduleTime === "string" && scheduleTime.includes("T")) {
+    // Handle datetime-local format: "YYYY-MM-DDTHH:MM"
+    const [datePart, timePart] = scheduleTime.split("T");
+    const [year, month, day] = datePart.split("-").map(Number);
+    const [hours, minutes] = timePart.split(":").map(Number);
+
+    // Create Date object using local time components (month is 0-indexed)
+    scheduleDate = new Date(year, month - 1, day, hours, minutes);
+
+    // CRITICAL FIX: Format for SQLite as local time, NOT UTC
+    // SQLite datetime() function expects: 'YYYY-MM-DD HH:MM:SS'
+    const pad = (num) => String(num).padStart(2, "0");
+    sqliteDateTime = `${year}-${pad(month)}-${pad(day)} ${pad(hours)}:${pad(minutes)}:00`;
+
+    console.log("TIMEZONE DEBUG - Parsed datetime-local as LOCAL time:", {
+      input: scheduleTime,
+      parsedDate: scheduleDate.toString(),
+      parsedYear: year,
+      parsedMonth: month,
+      parsedDay: day,
+      parsedHours: hours,
+      parsedMinutes: minutes,
+      sqliteFormat: sqliteDateTime,
+      // Show what toISOString() would give (for comparison)
+      isoStringWouldBe: scheduleDate.toISOString(),
+      timezoneOffset: scheduleDate.getTimezoneOffset(),
+    });
+  } else {
+    // Fallback for other formats
+    scheduleDate = new Date(scheduleTime);
+    // Format as local time for SQLite
+    const year = scheduleDate.getFullYear();
+    const month = scheduleDate.getMonth() + 1;
+    const day = scheduleDate.getDate();
+    const hours = scheduleDate.getHours();
+    const minutes = scheduleDate.getMinutes();
+    const pad = (num) => String(num).padStart(2, "0");
+    sqliteDateTime = `${year}-${pad(month)}-${pad(day)} ${pad(hours)}:${pad(minutes)}:00`;
+
+    console.log("Used fallback Date parsing (local time):", {
+      input: scheduleTime,
+      parsed: scheduleDate.toString(),
+      sqliteFormat: sqliteDateTime,
+    });
+  }
   const stmt = db.prepare(`
     INSERT INTO scheduled_jobs 
     (from_username, target_usernames, message_variations, schedule_time, campaign_id, status, is_recurring, recurring_interval)
-    VALUES (?, ?, ?, datetime(?), ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   try {
@@ -35,17 +76,18 @@ function addScheduledJob({
       fromUsername,
       JSON.stringify(targetUsernames),
       JSON.stringify(messageVariations),
-      scheduleDate.toISOString(),
+      sqliteDateTime, // Store as local time string, NOT ISO UTC
       null, // campaign_id
       "pending",
       isRecurring ? 1 : 0,
       recurringInterval
     );
 
-    console.log(
-      "Successfully added scheduled job with ID:",
-      result.lastInsertRowid
-    );
+    console.log("TIMEZONE DEBUG - Successfully stored in database:", {
+      jobId: result.lastInsertRowid,
+      storedDateTime: sqliteDateTime,
+      originalInput: scheduleTime,
+    });
     return result.lastInsertRowid;
   } catch (error) {
     console.error("Error adding scheduled job:", error);
@@ -63,10 +105,35 @@ function getScheduledJobs() {
 }
 
 function updateJobStatus(jobId, status) {
-  const stmt = db.prepare(
-    "UPDATE scheduled_jobs SET status = ?, last_run = CURRENT_TIMESTAMP WHERE id = ?"
-  );
-  stmt.run(status, jobId);
+  // Try the full update first, fall back to basic update if column doesn't exist
+  try {
+    const stmt = db.prepare(
+      "UPDATE scheduled_jobs SET status = ?, last_run = CURRENT_TIMESTAMP WHERE id = ?"
+    );
+    stmt.run(status, jobId);
+  } catch (error) {
+    if (error.message.includes("no such column: last_run")) {
+      console.log("last_run column doesn't exist, using basic update");
+      const stmt = db.prepare(
+        "UPDATE scheduled_jobs SET status = ? WHERE id = ?"
+      );
+      stmt.run(status, jobId);
+    } else {
+      throw error;
+    }
+  }
+}
+
+function deleteScheduledJob(jobId) {
+  const stmt = db.prepare("DELETE FROM scheduled_jobs WHERE id = ?");
+  const result = stmt.run(jobId);
+
+  if (result.changes === 0) {
+    throw new Error(`Job with ID ${jobId} not found`);
+  }
+
+  console.log(`Successfully deleted job ${jobId}`);
+  return result;
 }
 
 // DM Stats and Logs
@@ -178,24 +245,62 @@ function deleteCampaign(id) {
 
 // Rate Limits
 function updateDMRateLimits(username) {
-  const stmt = db.prepare(`
-    INSERT INTO dm_rate_limits (username, daily_dm_count, last_dm_time, last_reset_date, total_dm_sent)
-    VALUES (?, 1, CURRENT_TIMESTAMP, DATE('now', 'localtime'), 1)
-    ON CONFLICT(username) DO UPDATE SET
-    daily_dm_count = CASE 
-      WHEN DATE(last_reset_date) < DATE('now', 'localtime')
-      THEN 1
-      ELSE daily_dm_count + 1
-    END,
-    last_dm_time = CURRENT_TIMESTAMP,
-    last_reset_date = CASE 
-      WHEN DATE(last_reset_date) < DATE('now', 'localtime')
-      THEN DATE('now', 'localtime')
-      ELSE last_reset_date
-    END,
-    total_dm_sent = total_dm_sent + 1
-  `);
-  stmt.run(username);
+  console.log(`DEBUG: Updating DM count for username: "${username}"`);
+
+  try {
+    const stmt = db.prepare(`
+      INSERT INTO dm_rate_limits (username, daily_dm_count, last_dm_time, last_reset_date, total_dm_sent)
+      VALUES (?, 1, CURRENT_TIMESTAMP, DATE('now', 'localtime'), 1)
+      ON CONFLICT(username) DO UPDATE SET
+      daily_dm_count = CASE 
+        WHEN DATE(last_reset_date) < DATE('now', 'localtime')
+        THEN 1
+        ELSE daily_dm_count + 1
+      END,
+      last_dm_time = CURRENT_TIMESTAMP,
+      last_reset_date = CASE 
+        WHEN DATE(last_reset_date) < DATE('now', 'localtime')
+        THEN DATE('now', 'localtime')
+        ELSE last_reset_date
+      END,
+      total_dm_sent = total_dm_sent + 1
+    `);
+
+    const result = stmt.run(username);
+    console.log(
+      `DEBUG: DM count update successful for ${username}, changes: ${result.changes}`
+    );
+  } catch (error) {
+    console.error(
+      `DEBUG: DM count update failed for ${username}:`,
+      error.message
+    );
+
+    // Try to get table info to debug
+    try {
+      const tableExists = db
+        .prepare(
+          `SELECT name FROM sqlite_master WHERE type='table' AND name='dm_rate_limits'`
+        )
+        .get();
+      console.log(`DEBUG: Table exists:`, tableExists);
+
+      if (tableExists) {
+        const tableInfo = db.prepare("PRAGMA table_info(dm_rate_limits)").all();
+        console.log(
+          `DEBUG: Table structure:`,
+          tableInfo.map((c) => `${c.name}(pk:${c.pk})`).join(", ")
+        );
+      }
+    } catch (debugError) {
+      console.error(`DEBUG: Failed to get table info:`, debugError.message);
+    }
+
+    // Don't throw the error - this is not critical for DM sending
+    console.warn(
+      `Non-critical: Failed to update DM rate limits for ${username}: ${error.message}`
+    );
+  }
 }
 
 // Alias for updateDMRateLimits to maintain compatibility
@@ -206,23 +311,45 @@ function getPendingJobs() {
   console.log("Querying for pending jobs at:", now.toISOString());
   console.log("Local time:", now.toLocaleString());
 
+  // TIMEZONE FIX: Format current time as local time string for comparison
+  // This matches the format we use when storing: 'YYYY-MM-DD HH:MM:SS'
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1;
+  const day = now.getDate();
+  const hours = now.getHours();
+  const minutes = now.getMinutes();
+  const seconds = now.getSeconds();
+  const pad = (num) => String(num).padStart(2, "0");
+  const currentLocalTime = `${year}-${pad(month)}-${pad(day)} ${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+
+  console.log("Current local time for comparison:", currentLocalTime);
+
   // First, let's see all jobs to debug
   const allJobs = db
     .prepare(`SELECT id, schedule_time, status FROM scheduled_jobs`)
     .all();
   console.log("All jobs in database:", allJobs);
 
-  // Convert schedule_time to Unix timestamp for comparison
+  // CRITICAL FIX: Compare local time strings directly instead of using unixepoch()
+  // Since we store schedule_time as local time strings, we need to compare with local time
   const stmt = db.prepare(`
     SELECT *
     FROM scheduled_jobs 
     WHERE status = 'pending' 
-    AND unixepoch(schedule_time) <= unixepoch('now')
+    AND schedule_time <= ?
     ORDER BY schedule_time ASC
   `);
 
-  const jobs = stmt.all();
-  console.log("Pending jobs found:", jobs);
+  const jobs = stmt.all(currentLocalTime);
+  console.log("TIMEZONE DEBUG - Jobs ready to execute:", {
+    currentTime: currentLocalTime,
+    jobsFound: jobs.length,
+    jobs: jobs.map((j) => ({
+      id: j.id,
+      schedule_time: j.schedule_time,
+      from_username: j.from_username,
+    })),
+  });
 
   return jobs.map((job) => ({
     ...job,
@@ -321,6 +448,8 @@ module.exports = {
   updateCampaignStatus,
   deleteCampaign,
   updateDMCount,
+  updateDMRateLimits,
+  deleteScheduledJob,
   scheduleDM: addScheduledJob, // Alias addScheduledJob as scheduleDM for compatibility
   addCampaignTarget,
   getCampaignTargets,

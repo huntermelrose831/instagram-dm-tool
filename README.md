@@ -99,7 +99,6 @@ instagram-dm-tool/
 │   ├── components/              # React components
 │   │   ├── Home.jsx            # Dashboard and overview
 │   │   ├── Messaging.jsx       # Message sending interface
-│   │   ├── InboxNew.jsx        # Advanced inbox management
 │   │   ├── SmartAutomation.jsx # Automation workflow builder
 │   │   ├── AccountSafety.jsx   # Account management and security
 │   │   ├── AdvancedTargeting.jsx # Targeting and scraping tools
@@ -224,7 +223,6 @@ instagram-dm-tool/
 5. **Launch and Monitor**
    - Start your campaigns
    - Monitor performance in Analytics
-   - Manage conversations in Inbox
    - Track leads in CRM
 
 ### Team Setup
@@ -332,7 +330,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ### Recent Updates
 
-- ✅ Advanced inbox management with conversation threading
 - ✅ Smart automation with trigger-based workflows
 - ✅ Account safety monitoring and proxy management
 - ✅ Advanced targeting with competitor analysis

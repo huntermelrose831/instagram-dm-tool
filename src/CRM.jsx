@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   FaAddressBook,
   FaUser,
@@ -162,6 +162,26 @@ const CRM = () => {
     }
   };
 
+  const handleSearchTermChange = useCallback((e) => {
+    setSearchTerm(e.target.value);
+  }, []);
+
+  const handleFilterStatusChange = useCallback((e) => {
+    setFilterStatus(e.target.value);
+  }, []);
+
+  const handleFilterTagChange = useCallback((e) => {
+    setFilterTag(e.target.value);
+  }, []);
+
+  const handleNewNoteChange = useCallback((e) => {
+    setNewNote(e.target.value);
+  }, []);
+
+  const handleNewContactChange = useCallback((field, value) => {
+    setNewContact((prev) => ({ ...prev, [field]: value }));
+  }, []);
+
   const filteredContacts = contacts.filter(
     (contact) =>
       contact.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -211,7 +231,7 @@ const CRM = () => {
                     <input
                       type="text"
                       value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
+                      onChange={handleSearchTermChange}
                       placeholder="Search contacts..."
                       className="pl-10 pr-4 py-2 w-full border border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500 text-black"
                     />
@@ -219,7 +239,7 @@ const CRM = () => {
 
                   <select
                     value={filterStatus}
-                    onChange={(e) => setFilterStatus(e.target.value)}
+                    onChange={handleFilterStatusChange}
                     className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500 text-black"
                   >
                     <option value="">All Statuses</option>
@@ -233,7 +253,7 @@ const CRM = () => {
                   <input
                     type="text"
                     value={filterTag}
-                    onChange={(e) => setFilterTag(e.target.value)}
+                    onChange={handleFilterTagChange}
                     placeholder="Filter by tag..."
                     className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500 text-black"
                   />
@@ -403,7 +423,7 @@ const CRM = () => {
                       <input
                         type="text"
                         value={newNote}
-                        onChange={(e) => setNewNote(e.target.value)}
+                        onChange={handleNewNoteChange}
                         placeholder="Add a note..."
                         className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500 text-black text-sm"
                         onKeyPress={(e) => e.key === "Enter" && addNote()}
@@ -439,7 +459,7 @@ const CRM = () => {
                     type="text"
                     value={newContact.username}
                     onChange={(e) =>
-                      setNewContact({ ...newContact, username: e.target.value })
+                      handleNewContactChange("username", e.target.value)
                     }
                     placeholder="Instagram username"
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500 text-black"
@@ -448,7 +468,7 @@ const CRM = () => {
                     type="email"
                     value={newContact.email}
                     onChange={(e) =>
-                      setNewContact({ ...newContact, email: e.target.value })
+                      handleNewContactChange("email", e.target.value)
                     }
                     placeholder="Email address"
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500 text-black"
@@ -457,7 +477,7 @@ const CRM = () => {
                     type="tel"
                     value={newContact.phone}
                     onChange={(e) =>
-                      setNewContact({ ...newContact, phone: e.target.value })
+                      handleNewContactChange("phone", e.target.value)
                     }
                     placeholder="Phone number"
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500 text-black"
@@ -465,7 +485,7 @@ const CRM = () => {
                   <select
                     value={newContact.status}
                     onChange={(e) =>
-                      setNewContact({ ...newContact, status: e.target.value })
+                      handleNewContactChange("status", e.target.value)
                     }
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-indigo-500 text-black"
                   >

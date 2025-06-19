@@ -4,13 +4,13 @@ class AccountsService {
   // Create or update an account
   static upsertAccount(accountData) {
     const stmt = db.prepare(`
-      INSERT INTO accounts (username, email, password_hash, proxy_id, is_active, cookies)
+      INSERT INTO instagram_accounts (username, email, password_encrypted, proxy_id, status, cookies)
       VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(username) DO UPDATE SET
         email = excluded.email,
-        password_hash = excluded.password_hash,
+        password_encrypted = excluded.password_encrypted,
         proxy_id = excluded.proxy_id,
-        is_active = excluded.is_active,
+        status = excluded.status,
         cookies = excluded.cookies,
         updated_at = CURRENT_TIMESTAMP
       RETURNING *
@@ -21,19 +21,23 @@ class AccountsService {
       accountData.email || null,
       accountData.passwordHash || null,
       accountData.proxyId || null,
-      accountData.isActive !== undefined ? accountData.isActive : 1,
+      accountData.isActive !== undefined
+        ? accountData.isActive
+          ? "active"
+          : "inactive"
+        : "active",
       accountData.cookies ? JSON.stringify(accountData.cookies) : null
     );
   }
 
   // Get all accounts
   static getAccounts(filters = {}) {
-    let query = "SELECT * FROM accounts WHERE 1=1";
+    let query = "SELECT * FROM instagram_accounts WHERE 1=1";
     const params = [];
 
     if (filters.isActive !== undefined) {
-      query += " AND is_active = ?";
-      params.push(filters.isActive ? 1 : 0);
+      query += " AND status = ?";
+      params.push(filters.isActive ? "active" : "inactive");
     }
 
     if (filters.search) {
@@ -45,24 +49,25 @@ class AccountsService {
 
     const stmt = db.prepare(query);
     const accounts = stmt.all(...params);
-
     return accounts.map((account) => ({
       ...account,
       cookies: account.cookies ? JSON.parse(account.cookies) : null,
-      isActive: !!account.is_active,
+      isActive: account.status === "active",
     }));
   }
 
   // Get account by username
   static getAccountByUsername(username) {
-    const stmt = db.prepare("SELECT * FROM accounts WHERE username = ?");
+    const stmt = db.prepare(
+      "SELECT * FROM instagram_accounts WHERE username = ?"
+    );
     const account = stmt.get(username);
 
     if (account) {
       return {
         ...account,
         cookies: account.cookies ? JSON.parse(account.cookies) : null,
-        isActive: !!account.is_active,
+        isActive: account.status === "active",
       };
     }
 
@@ -72,17 +77,19 @@ class AccountsService {
   // Update account status
   static updateAccountStatus(username, isActive) {
     const stmt = db.prepare(`
-      UPDATE accounts 
-      SET is_active = ?, updated_at = CURRENT_TIMESTAMP 
+      UPDATE instagram_accounts 
+      SET status = ?, updated_at = CURRENT_TIMESTAMP 
       WHERE username = ?
     `);
-    const info = stmt.run(isActive ? 1 : 0, username);
+    const info = stmt.run(isActive ? "active" : "inactive", username);
     return info.changes > 0;
   }
 
   // Delete account
   static deleteAccount(username) {
-    const stmt = db.prepare("DELETE FROM accounts WHERE username = ?");
+    const stmt = db.prepare(
+      "DELETE FROM instagram_accounts WHERE username = ?"
+    );
     const info = stmt.run(username);
     return info.changes > 0;
   }
@@ -90,7 +97,7 @@ class AccountsService {
   // Update account cookies
   static updateAccountCookies(username, cookies) {
     const stmt = db.prepare(`
-      UPDATE accounts 
+      UPDATE instagram_accounts 
       SET cookies = ?, updated_at = CURRENT_TIMESTAMP 
       WHERE username = ?
     `);
@@ -103,9 +110,9 @@ class AccountsService {
     const stmt = db.prepare(`
       SELECT 
         COUNT(*) as total,
-        SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as active,
+        SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active,
         SUM(CASE WHEN cookies IS NOT NULL THEN 1 ELSE 0 END) as logged_in
-      FROM accounts
+      FROM instagram_accounts
     `);
 
     return stmt.get();
@@ -114,20 +121,15 @@ class AccountsService {
   // Update account health metrics
   static updateAccountHealth(username, healthData) {
     const stmt = db.prepare(`
-      UPDATE accounts 
+      UPDATE instagram_accounts 
       SET 
-        health_score = ?,
-        last_health_check = CURRENT_TIMESTAMP,
-        risk_level = ?,
+        risk_score = ?,
+        last_active = CURRENT_TIMESTAMP,
         updated_at = CURRENT_TIMESTAMP
       WHERE username = ?
     `);
 
-    const info = stmt.run(
-      healthData.healthScore || null,
-      healthData.riskLevel || "low",
-      username
-    );
+    const info = stmt.run(healthData.riskScore || 0, username);
 
     return info.changes > 0;
   }
@@ -138,23 +140,28 @@ class AccountsService {
       SELECT 
         username,
         email,
-        is_active,
-        health_score,
-        risk_level,
-        last_health_check,
+        status,
+        risk_score,
+        warnings_count,
+        last_active,
         created_at,
         updated_at
-      FROM accounts 
-      ORDER BY health_score DESC NULLS LAST
+      FROM instagram_accounts 
+      ORDER BY risk_score ASC
     `);
 
     const accounts = stmt.all();
 
     return accounts.map((account) => ({
       ...account,
-      isActive: !!account.is_active,
-      healthScore: account.health_score || 100,
-      riskLevel: account.risk_level || "low",
+      isActive: account.status === "active",
+      riskScore: account.risk_score || 0,
+      riskLevel:
+        account.risk_score > 50
+          ? "high"
+          : account.risk_score > 20
+            ? "medium"
+            : "low",
     }));
   }
 }

@@ -32,6 +32,7 @@ const {
   AccountsService,
   ScrapingService,
   ProxyService,
+  AutomationService,
   AnalyticsService,
   RateLimitService,
 } = require("./database");
@@ -55,26 +56,78 @@ initializeScheduler();
 
 app.post("/api/send-dms", async (req, res) => {
   try {
-    const { username, usernames, message } = req.body;
+    const {
+      username,
+      usernames,
+      message,
+      scheduled,
+      scheduleTime,
+      messageVariations,
+    } = req.body;
 
-    if (!username || !usernames || !message) {
+    console.log("=== /api/send-dms REQUEST ===");
+    console.log("Request body:", JSON.stringify(req.body, null, 2));
+
+    if (
+      !username ||
+      !usernames ||
+      (!message && (!messageVariations || messageVariations.length === 0))
+    ) {
       return res.status(400).json({
         status: "error",
         message: "Missing required fields",
-        details: { username, usernames, message },
+        details: { username, usernames, message, messageVariations },
       });
     }
 
-    await sendDMs({
-      igUsername: username,
-      usernames,
-      message,
-    });
+    // Handle scheduling
+    if (scheduled && scheduleTime) {
+      console.log("Scheduling DM for later execution...");
+      console.log("Schedule time received:", scheduleTime);
 
-    res.json({
-      status: "success",
-      message: "Messages sent successfully",
-    });
+      // Use messageVariations if provided, otherwise use the single message
+      const variations =
+        messageVariations && messageVariations.length > 0
+          ? messageVariations
+          : [message];
+
+      try {
+        const jobId = await scheduleDM({
+          fromUsername: username,
+          targetUsernames: usernames,
+          messageVariations: variations,
+          scheduleTime: scheduleTime, // Pass the datetime-local string directly
+          isRecurring: false,
+          recurringInterval: null,
+        });
+
+        return res.json({
+          status: "success",
+          message: "DM scheduled successfully",
+          jobId,
+          scheduledFor: scheduleTime,
+        });
+      } catch (scheduleError) {
+        console.error("Error scheduling DM:", scheduleError);
+        return res.status(500).json({
+          status: "error",
+          message: "Failed to schedule DM: " + scheduleError.message,
+        });
+      }
+    } else {
+      // Send immediately
+      console.log("Sending DM immediately...");
+      await sendDMs({
+        igUsername: username,
+        usernames,
+        message,
+      });
+
+      return res.json({
+        status: "success",
+        message: "Messages sent successfully",
+      });
+    }
   } catch (err) {
     console.error("DM sending error:", err);
     res.status(500).json({
@@ -537,12 +590,10 @@ app.post("/api/scrape/keywords", async (req, res) => {
   }
 });
 
-// Target usernames endpoints - Updated to use LeadsService
+// Target usernames endpoints - Use targetsStore for targets.json
 app.get("/api/targets", async (req, res) => {
   try {
-    // Get leads that have been marked as targets
-    const leads = LeadsService.getAllLeads();
-    const targets = leads.filter((lead) => lead.isTarget);
+    const targets = targetsStore.loadTargets();
     res.json({ status: "success", targets });
   } catch (err) {
     console.error("Error fetching targets:", err);
@@ -633,10 +684,18 @@ app.post("/api/schedule-dms", async (req, res) => {
           scheduleTime,
         },
       });
-    }
+    } // Clean the username to remove @ prefix if present
+    const cleanFromUsername = fromUsername.replace(/^@/, "");
+
+    console.log("TIMEZONE DEBUG - Scheduling with cleaned username:", {
+      original: fromUsername,
+      cleaned: cleanFromUsername,
+      scheduleTime,
+      targetCount: targetUsernames.length,
+    });
 
     const jobId = await scheduleDM({
-      fromUsername,
+      fromUsername: cleanFromUsername,
       targetUsernames,
       messageVariations,
       scheduleTime,
@@ -700,6 +759,60 @@ app.get("/api/scheduled-jobs", async (req, res) => {
   }
 });
 
+// Delete a scheduled job
+app.delete("/api/scheduled-jobs/:jobId", async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    console.log(`Attempting to cancel job ${jobId}`);
+
+    // Import the updateJobStatus function
+    const { updateJobStatus } = require("./database/messaging");
+
+    // Update job status to cancelled
+    await updateJobStatus(jobId, "cancelled");
+
+    console.log(`Job ${jobId} cancelled successfully`);
+    res.json({
+      status: "success",
+      message: "Job cancelled successfully",
+    });
+  } catch (err) {
+    console.error("Error cancelling job:", err);
+    res.status(500).json({
+      status: "error",
+      message: "Failed to cancel job",
+      error: err.message,
+    });
+  }
+});
+
+// Permanently delete a scheduled job
+app.delete("/api/scheduled-jobs/:jobId/delete", async (req, res) => {
+  try {
+    const { jobId } = req.params;
+    console.log(`Attempting to permanently delete job ${jobId}`);
+
+    // Import the deleteJob function from messaging
+    const { deleteScheduledJob } = require("./database/messaging");
+
+    // Permanently delete the job
+    await deleteScheduledJob(jobId);
+
+    console.log(`Job ${jobId} deleted successfully`);
+    res.json({
+      status: "success",
+      message: "Job deleted successfully",
+    });
+  } catch (err) {
+    console.error("Error deleting job:", err);
+    res.status(500).json({
+      status: "error",
+      message: "Failed to delete job",
+      error: err.message,
+    });
+  }
+});
+
 // Campaign Management Routes
 app.get("/api/campaigns", async (req, res) => {
   try {
@@ -720,7 +833,7 @@ app.post("/api/campaigns", async (req, res) => {
       schedule_time,
       is_scheduled,
     } = req.body; // Validate the account exists
-    const account = AccountsService.getAccount(account_username);
+    const account = AccountsService.getAccountByUsername(account_username);
     if (!account) {
       return res.status(400).json({
         status: "error",
@@ -1123,207 +1236,234 @@ app.get("/api/dashboard/stats", async (req, res) => {
   }
 });
 
-// Inbox Management Routes
-app.get("/api/inbox/conversations", async (req, res) => {
+// ============================================================
+// SMART AUTOMATION ENDPOINTS
+// ============================================================
+
+// Get all automation rules
+app.get("/api/automation/rules", async (req, res) => {
   try {
-    const { status = "all", search = "" } = req.query;
+    const { active_only = "true" } = req.query;
+    const rules = AutomationService.getAutomationRules(active_only === "true");
+    res.json({
+      status: "success",
+      rules: rules,
+    });
+  } catch (error) {
+    console.error("Error fetching automation rules:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
 
-    // Mock conversations data - replace with actual database queries
-    const mockConversations = [
-      {
-        id: 1,
-        username: "user123",
-        status: "unread",
-        lastMessage: "Hey, thanks for reaching out!",
-        lastActivity: new Date().toISOString(),
-        campaign: "Summer Campaign",
-        tags: ["interested", "hot-lead"],
-        unreadCount: 2,
-      },
-      {
-        id: 2,
-        username: "follower456",
-        status: "replied",
-        lastMessage: "Sure, I'd love to learn more",
-        lastActivity: new Date(Date.now() - 86400000).toISOString(),
-        campaign: "Product Launch",
-        tags: ["customer"],
-        unreadCount: 0,
-      },
-      {
-        id: 3,
-        username: "prospect789",
-        status: "read",
-        lastMessage: "Sounds interesting!",
-        lastActivity: new Date(Date.now() - 172800000).toISOString(),
-        campaign: null,
-        tags: [],
-        unreadCount: 0,
-      },
-    ];
+// Create new automation rule
+app.post("/api/automation/rules", async (req, res) => {
+  try {
+    const ruleData = req.body;
+    const result = AutomationService.createAutomationRule(ruleData);
+    res.json({
+      status: "success",
+      message: "Automation rule created successfully",
+      ruleId: result.lastInsertRowid,
+    });
+  } catch (error) {
+    console.error("Error creating automation rule:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
 
-    let filteredConversations = mockConversations;
+// Toggle automation rule active status
+app.patch("/api/automation/rules/:id/toggle", async (req, res) => {
+  try {
+    const ruleId = parseInt(req.params.id);
+    const { is_active } = req.body;
 
-    // Filter by status
-    if (status !== "all") {
-      filteredConversations = filteredConversations.filter(
-        (conv) => conv.status === status
+    AutomationService.toggleAutomationRule(ruleId, is_active);
+    res.json({
+      status: "success",
+      message: `Rule ${is_active ? "activated" : "deactivated"} successfully`,
+    });
+  } catch (error) {
+    console.error("Error toggling automation rule:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+// Delete automation rule
+app.delete("/api/automation/rules/:id", async (req, res) => {
+  try {
+    const ruleId = parseInt(req.params.id);
+    AutomationService.deleteAutomationRule(ruleId);
+    res.json({
+      status: "success",
+      message: "Automation rule deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting automation rule:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+// Get follow-up sequences
+app.get("/api/automation/sequences", async (req, res) => {
+  try {
+    const { active_only = "true" } = req.query;
+    const sequences = AutomationService.getFollowupSequences(
+      active_only === "true"
+    );
+    res.json({
+      status: "success",
+      sequences: sequences,
+    });
+  } catch (error) {
+    console.error("Error fetching follow-up sequences:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+app.post("/api/automation/sequences", async (req, res) => {
+  try {
+    const sequenceData = req.body;
+    const result = AutomationService.createFollowupSequence(sequenceData);
+    res.json({
+      status: "success",
+      message: "Follow-up sequence created successfully",
+      sequenceId: result.lastInsertRowid,
+    });
+  } catch (error) {
+    console.error("Error creating follow-up sequence:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+// Analyze message sentiment
+app.post("/api/automation/analyze-message", async (req, res) => {
+  try {
+    const { contact_id, message_text } = req.body;
+    const analysis = AutomationService.analyzeMessage(contact_id, message_text);
+    res.json({
+      status: "success",
+      analysis: analysis,
+    });
+  } catch (error) {
+    console.error("Error analyzing message:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+// Get high-value leads
+app.get("/api/automation/high-value-leads", async (req, res) => {
+  try {
+    const { limit = 50 } = req.query;
+    const leads = AutomationService.getHighValueLeads(parseInt(limit));
+    res.json({
+      status: "success",
+      leads: leads,
+    });
+  } catch (error) {
+    console.error("Error fetching high-value leads:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+// Get automation metrics
+app.get("/api/automation/metrics", async (req, res) => {
+  try {
+    const { timeframe = "30d" } = req.query;
+    const metrics = AutomationService.getAutomationMetrics(timeframe);
+    res.json({
+      status: "success",
+      metrics: metrics,
+    });
+  } catch (error) {
+    console.error("Error fetching automation metrics:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+// Get rule performance
+app.get("/api/automation/rules/performance", async (req, res) => {
+  try {
+    const performance = AutomationService.getRulePerformance();
+    res.json({
+      status: "success",
+      performance: performance,
+    });
+  } catch (error) {
+    console.error("Error fetching rule performance:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+// Get sequence performance
+app.get("/api/automation/sequences/performance", async (req, res) => {
+  try {
+    const performance = AutomationService.getSequencePerformance();
+    res.json({
+      status: "success",
+      performance: performance,
+    });
+  } catch (error) {
+    console.error("Error fetching sequence performance:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+// Manual trigger automation for a contact
+app.post("/api/automation/trigger", async (req, res) => {
+  try {
+    const { contact_id, message_text, rule_id } = req.body;
+
+    if (rule_id) {
+      // Trigger specific rule
+      const rules = AutomationService.getAutomationRules();
+      const rule = rules.find((r) => r.id === rule_id);
+      if (rule) {
+        const result = await AutomationService.executeAutomationRule(
+          rule,
+          contact_id,
+          { manual: true }
+        );
+        res.json({
+          status: "success",
+          message: "Automation rule executed successfully",
+          result: result,
+        });
+      } else {
+        res.status(404).json({ status: "error", message: "Rule not found" });
+      }
+    } else {
+      // Find and trigger matching rules
+      const triggeredRules = AutomationService.getTriggeredRules(
+        contact_id,
+        message_text || ""
       );
-    }
+      const results = [];
 
-    // Filter by search term
-    if (search) {
-      filteredConversations = filteredConversations.filter((conv) =>
-        conv.username.toLowerCase().includes(search.toLowerCase())
-      );
-    }
+      for (const rule of triggeredRules) {
+        try {
+          const result = await AutomationService.executeAutomationRule(
+            rule,
+            contact_id,
+            { manual: true }
+          );
+          results.push({ ruleId: rule.id, ruleName: rule.name, result });
+        } catch (error) {
+          results.push({
+            ruleId: rule.id,
+            ruleName: rule.name,
+            error: error.message,
+          });
+        }
+      }
 
-    res.json({
-      status: "success",
-      conversations: filteredConversations,
-    });
-  } catch (error) {
-    console.error("Error fetching conversations:", error);
-    res.status(500).json({ status: "error", message: error.message });
-  }
-});
-
-app.get("/api/inbox/conversations/:id/messages", async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    // Mock messages data - replace with actual database queries
-    const mockMessages = [
-      {
-        id: 1,
-        content:
-          "Hi! I saw your post about the new product launch. Very interesting!",
-        isOutgoing: false,
-        isRead: true,
-        isAutomated: false,
-        createdAt: new Date(Date.now() - 7200000).toISOString(),
-      },
-      {
-        id: 2,
-        content:
-          "Thanks for your interest! Would you like to learn more about our features?",
-        isOutgoing: true,
-        isRead: true,
-        isAutomated: true,
-        createdAt: new Date(Date.now() - 3600000).toISOString(),
-      },
-      {
-        id: 3,
-        content: "Yes, definitely! Can you send me more details?",
-        isOutgoing: false,
-        isRead: true,
-        isAutomated: false,
-        createdAt: new Date(Date.now() - 1800000).toISOString(),
-      },
-    ];
-
-    res.json({
-      status: "success",
-      messages: mockMessages,
-    });
-  } catch (error) {
-    console.error("Error fetching messages:", error);
-    res.status(500).json({ status: "error", message: error.message });
-  }
-});
-
-app.post("/api/inbox/conversations/:id/reply", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { message } = req.body;
-
-    if (!message || !message.trim()) {
-      return res.status(400).json({
-        status: "error",
-        message: "Message content is required",
+      res.json({
+        status: "success",
+        message: `Triggered ${triggeredRules.length} automation rules`,
+        results: results,
       });
     }
-
-    // Here you would typically:
-    // 1. Save the message to database
-    // 2. Send the actual Instagram DM
-    // 3. Update conversation status
-
-    console.log(`Sending reply to conversation ${id}: ${message}`);
-
-    res.json({
-      status: "success",
-      message: "Reply sent successfully",
-    });
   } catch (error) {
-    console.error("Error sending reply:", error);
-    res.status(500).json({ status: "error", message: error.message });
-  }
-});
-
-app.patch("/api/inbox/conversations/:id/mark-read", async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    // Update conversation status to read
-    console.log(`Marking conversation ${id} as read`);
-
-    res.json({
-      status: "success",
-      message: "Conversation marked as read",
-    });
-  } catch (error) {
-    console.error("Error marking conversation as read:", error);
-    res.status(500).json({ status: "error", message: error.message });
-  }
-});
-
-app.patch("/api/inbox/conversations/:id/status", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { status } = req.body;
-
-    if (
-      !["unread", "read", "replied", "archived", "starred"].includes(status)
-    ) {
-      return res.status(400).json({
-        status: "error",
-        message: "Invalid status",
-      });
-    }
-
-    console.log(`Updating conversation ${id} status to ${status}`);
-
-    res.json({
-      status: "success",
-      message: "Conversation status updated",
-    });
-  } catch (error) {
-    console.error("Error updating conversation status:", error);
-    res.status(500).json({ status: "error", message: error.message });
-  }
-});
-
-app.post("/api/inbox/conversations/:id/tags", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { tag } = req.body;
-
-    if (!tag || !tag.trim()) {
-      return res.status(400).json({
-        status: "error",
-        message: "Tag is required",
-      });
-    }
-
-    console.log(`Adding tag "${tag}" to conversation ${id}`);
-
-    res.json({
-      status: "success",
-      message: "Tag added successfully",
-    });
-  } catch (error) {
-    console.error("Error adding tag:", error);
+    console.error("Error triggering automation:", error);
     res.status(500).json({ status: "error", message: error.message });
   }
 });
@@ -2408,5 +2548,129 @@ app.post("/api/team/templates/:id/share", async (req, res) => {
   } catch (error) {
     console.error("Error sharing template:", error);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// Instagram Service Management
+const InstagramService = require("./services/instagramService_fixed.js");
+
+// Global Instagram service instance
+let instagramService = null;
+
+// Get Saved Instagram Accounts
+app.get("/api/instagram/accounts", async (req, res) => {
+  try {
+    const accounts = accountsStore.loadAccounts();
+    // Return only usernames, not sensitive data like cookies
+    const accountList = accounts.map((account) => ({
+      username: account.username,
+      hasSession: account.cookies && account.cookies.length > 0,
+    }));
+
+    res.json({
+      status: "success",
+      accounts: accountList,
+    });
+  } catch (error) {
+    console.error("Error getting saved accounts:", error);
+    res.status(500).json({
+      status: "error",
+      message: error.message,
+    });
+  }
+});
+
+// Instagram Login (with saved cookies or fresh login)
+app.post("/api/instagram/login", async (req, res) => {
+  try {
+    const { username, password } = req.body;
+
+    if (!username) {
+      return res.status(400).json({
+        status: "error",
+        message: "Username is required",
+      });
+    }
+
+    // Instantiate InstagramService for this request, potentially passing username
+    // if your service is designed to handle user-specific sessions this way.
+    // If you maintain a single global instagramService instance, this part will differ.
+    // For this example, we create a new service instance for the login attempt.
+    // This assumes instagramService is designed to be instantiated per-operation or per-user.
+    // Consider if a global instance needs to be managed differently.
+
+    // If you have a global instagramService instance that needs to be (re)initialized for a user:
+    if (instagramService && typeof instagramService.close === "function") {
+      // await instagramService.close(); // Close previous session if any
+    }
+    // The refactored InstagramService constructor might take username for session path
+    instagramService = new InstagramService(username);
+
+    // The 'initialize' method is no longer separate.
+    // Login process itself will handle browser initialization via PuppeteerHelper.
+    // await instagramService.initialize(); // REMOVED
+
+    let loginSuccess = false;
+
+    // The refactored login method in InstagramService (via InstagramApi)
+    // should handle trying to load session / cookies first, then full login.
+    console.log(`Attempting login for: ${username}`);
+    // The single login method now handles both scenarios (with or without password)
+    loginSuccess = await instagramService.login(username, password);
+
+    // // First try to login with saved cookies - REMOVED, handled by login()
+    // console.log(`Attempting login with saved cookies for: ${username}`);
+    // loginSuccess = await instagramService.loginWithSavedCookies(username);
+
+    // // If saved cookies failed and password is provided, try fresh login - REMOVED, handled by login()    // if (!loginSuccess && password) {
+    //   console.log(
+    //     `Saved cookies failed, attempting fresh login for: ${username}`
+    //   );
+    //   loginSuccess = await instagramService.login(username, password);
+    // }
+
+    if (loginSuccess) {
+      res.json({
+        status: "success",
+        message: "Logged in successfully",
+        user: username,
+      });
+    } else {
+      res.status(401).json({
+        status: "error",
+        message: "Login failed. Please check your credentials or try again.",
+      });
+    }
+  } catch (error) {
+    console.error("Instagram login error in route:", error); // Added "in route" for clarity
+    res.status(500).json({
+      status: "error",
+      // Send a more generic message to the client for security
+      message: "An internal server error occurred during login.",
+      // message: error.message, // Avoid sending detailed error messages to client
+    });
+  }
+});
+
+// Get Login Status
+app.get("/api/instagram/status", async (req, res) => {
+  try {
+    const isLoggedIn =
+      instagramService && instagramService.instagramApi.getIsLoggedIn();
+    const currentUser = isLoggedIn
+      ? instagramService.instagramApi.getCurrentUser()
+      : null;
+
+    res.json({
+      status: "success",
+      isLoggedIn,
+      currentUser,
+    });
+  } catch (error) {
+    console.error("Error getting status:", error);
+    res.status(500).json({
+      status: "error",
+      message: error.message,
+    });
   }
 });

@@ -41,14 +41,6 @@ const SELECTORS = {
     "#mount_0_0_ky > div > div > div.x9f619.x1n2onr6.x1ja2u2z > div > div > div.x78zum5.xdt5ytf.x1t2pt76.x1n2onr6.x1ja2u2z.x10cihs4 > div.x9f619.xvbhtw8.x78zum5.x168nmei.x13lgxp2.x5pf9jr.xo71vjh.x1uhb9sk.x1plvlek.xryxfnj.x1c4vz4f.x2lah0s.x1q0g3np.xqjyukv.x1qjc9v5.x1oa3qoh.x1qughib > div.x1gryazu.xh8yej3.x10o80wk.x14k21rp.x1v4esvl.x8vgawa > section > main > section > div > div > div > div.xjp7ctv > div > div.x9f619.x1n2onr6.x1ja2u2z.x78zum5.xdt5ytf.x2lah0s.x193iq5w.xeuugli.xvbhtw8 > div > div.x6s0dn4.x1bs97v6.x1q0q8m5.x9f619.xat24cr.xh8yej3.x1qhh985.x14z7g9a.xzbw6zd.x78zum5.x1q0g3np.x1qughib.xsag5q8.xbbxn1n.xxbr6pl.xijc0j3 > div.x78zum5.x13a6bvl.x1ye3gou > div > div > div > svg",
   ],
 
-  INBOX_CONTAINER: [
-    'div[role="tablist"]',
-    'div[aria-label="Direct messaging"]',
-    'div[aria-label="Chats"]',
-    "div._aano",
-    'div[style*="height: 100%"][style*="width: 100%"]',
-  ],
-
   SEARCH_RESULTS: [
     'input[aria-label*="Radio selection"][type="checkbox"]',
     'div[role="dialog"] div[role="none"] div[role="button"]',
@@ -65,16 +57,9 @@ const SELECTORS = {
     'button[type="button"]:not([disabled])',
     'div[role="dialog"] button:has-text("Send")',
   ],
-
   NEWMESSAGEBUTTON: [
     'svg[aria-label="New message"]',
     'div[role="button"][aria-label="New message"]',
-  ],
-
-  MESSAGES_CONTAINER: [
-    'div[role="row"]',
-    'div[aria-label="Message"]',
-    'div[class*="message"]',
   ],
 };
 

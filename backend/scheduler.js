@@ -21,15 +21,32 @@ const getRandomDelay = () => {
 // Process a single message with rate limiting
 const processSingleMessage = async (fromUsername, targetUsername, message) => {
   try {
-    await sendDMs({
+    console.log(`Sending DM from ${fromUsername} to ${targetUsername}`);
+    const result = await sendDMs({
       igUsername: fromUsername,
       usernames: [targetUsername],
       message,
     });
-    await updateDMCount(fromUsername);
-    return true;
+
+    // Check if the message was actually sent
+    const messageWasSent = result && result.successCount > 0;
+
+    if (messageWasSent) {
+      // Update DM count only if message was actually sent
+      try {
+        await updateDMCount(fromUsername);
+      } catch (dmCountError) {
+        console.warn(
+          `Failed to update DM count for ${fromUsername}:`,
+          dmCountError.message
+        );
+        // Don't fail the message send because of DM count update failure
+      }
+    }
+
+    return messageWasSent;
   } catch (error) {
-    console.error(`Failed to send DM to ${targetUsername}:`, error);
+    console.error(`Failed to send DM to ${targetUsername}:`, error.message);
     return false;
   }
 };
@@ -52,16 +69,66 @@ const processJob = async (job) => {
     fromUser: from_username,
     rawTargets: target_usernames,
     rawMessages: message_variations,
-  });
+  }); // Verify account exists and has valid cookies
+  // Remove @ prefix if present
+  const cleanUsername = from_username.replace(/^@/, "");
 
-  // Verify account exists and has valid cookies
-  const account = accountsStore.getAccountByUsername(from_username);
+  // Add debug logging to see what accounts are available
+  const allAccounts = accountsStore.loadAccounts();
+  console.log(
+    "Available accounts in JSON store:",
+    allAccounts.map((acc) => acc.username)
+  );
+
+  // Also check database accounts
+  const { AccountsService } = require("./database");
+  const dbAccounts = AccountsService.getAccounts();
+  console.log(
+    "Available accounts in database:",
+    dbAccounts.map((acc) => acc.username)
+  );
+  console.log(`Looking for account: ${cleanUsername}`);
+
+  // Try different variations of the username in JSON store first
+  let account = accountsStore.getAccountByUsername(cleanUsername);
+
   if (!account) {
-    console.error(`Failed to find account for username: ${from_username}`);
+    // Try with @gmail.com suffix
+    account = accountsStore.getAccountByUsername(`${cleanUsername}@gmail.com`);
+    console.log(`Trying with @gmail.com: ${cleanUsername}@gmail.com`);
+  }
+
+  if (!account) {
+    // Try finding any account that starts with the username
+    account = allAccounts.find((acc) => acc.username.startsWith(cleanUsername));
+    console.log(`Trying to find account starting with: ${cleanUsername}`);
+  }
+
+  // If not found in JSON store, try database (but we need cookies for Instagram)
+  if (!account) {
+    const dbAccount = AccountsService.getAccountByUsername(cleanUsername);
+    if (dbAccount && dbAccount.cookies) {
+      account = dbAccount;
+      console.log(`Found account in database: ${dbAccount.username}`);
+    }
+  }
+
+  if (!account) {
+    console.error(
+      `Failed to find account for username: ${from_username} (cleaned: ${cleanUsername})`
+    );
+    console.error(
+      "Available accounts (JSON):",
+      allAccounts.map((acc) => acc.username)
+    );
+    console.error(
+      "Available accounts (DB):",
+      dbAccounts.map((acc) => acc.username)
+    );
     await updateJobStatus(id, "failed");
     return 0;
   }
-  console.log(`Found account for ${from_username}`);
+  console.log(`Found account: ${account.username}`);
 
   try {
     targets = Array.isArray(target_usernames)
@@ -87,16 +154,15 @@ const processJob = async (job) => {
     console.log(
       `Starting job #${id} for ${from_username} to send ${targets.length} messages`
     );
-    await updateJobStatus(id, "in_progress");
+    await updateJobStatus(id, "running");
 
     for (const target of targets) {
       try {
         // Pick a random message variation
         const message = messages[Math.floor(Math.random() * messages.length)];
         console.log(`Sending message to ${target}`);
-
         const success = await processSingleMessage(
-          from_username,
+          account.username,
           target,
           message
         );
@@ -117,16 +183,19 @@ const processJob = async (job) => {
         // Continue with next target
       }
     }
-
     const status =
       successCount === targets.length
         ? "completed"
         : successCount > 0
-          ? "partially_completed"
+          ? "completed" // Partial success - still mark as completed but log details
           : "failed";
     await updateJobStatus(id, status);
     console.log(
-      `Job #${id} finished with status: ${status} (${successCount}/${targets.length} sent)`
+      `Job #${id} finished with status: ${status} (${successCount}/${targets.length} sent)${
+        successCount > 0 && successCount < targets.length
+          ? " - PARTIAL SUCCESS"
+          : ""
+      }`
     );
     return successCount;
   } catch (error) {
@@ -136,19 +205,44 @@ const processJob = async (job) => {
   }
 };
 
+// Timeout wrapper for job processing to prevent stuck jobs
+const processJobWithTimeout = async (job, timeoutMs = 600000) => {
+  // 10 minute timeout
+  return new Promise(async (resolve, reject) => {
+    const timeout = setTimeout(() => {
+      console.error(
+        `Job #${job.id} timed out after ${timeoutMs / 1000} seconds`
+      );
+      updateJobStatus(job.id, "failed").catch(console.error);
+      reject(
+        new Error(`Job processing timed out after ${timeoutMs / 1000} seconds`)
+      );
+    }, timeoutMs);
+
+    try {
+      const result = await processJob(job);
+      clearTimeout(timeout);
+      resolve(result);
+    } catch (error) {
+      clearTimeout(timeout);
+      reject(error);
+    }
+  });
+};
+
 // Check for pending jobs every minute
 const checkPendingJobs = async () => {
-  console.log(
-    "\n--- Checking for pending jobs:",
-    new Date().toISOString(),
-    "---"
-  );
+  const now = new Date();
+  console.log("\n--- Checking for pending jobs ---");
+  console.log("Current time (UTC):", now.toISOString());
+  console.log("Current time (local):", now.toLocaleString());
+
   try {
     const pendingJobs = await getPendingJobs();
-    console.log(`Found ${pendingJobs.length} pending jobs`);
+    console.log(`Found ${pendingJobs.length} pending jobs ready to execute`);
 
     for (const job of pendingJobs) {
-      console.log("\nProcessing scheduled job:", {
+      console.log("\n🚀 Executing scheduled job:", {
         id: job.id,
         scheduledTime: job.schedule_time,
         fromUsername: job.from_username,
@@ -156,34 +250,83 @@ const checkPendingJobs = async () => {
           ? job.target_usernames.length
           : JSON.parse(job.target_usernames || "[]").length,
       });
-
       try {
-        await processJob(job);
+        await processJobWithTimeout(job);
       } catch (jobError) {
-        console.error(`Failed to process job ${job.id}:`, jobError);
+        console.error(`❌ Failed to process job ${job.id}:`, jobError.message);
+        // Ensure job status is updated to failed if not already done
+        try {
+          await updateJobStatus(job.id, "failed");
+        } catch (statusError) {
+          console.error(
+            `Failed to update job ${job.id} status to failed:`,
+            statusError.message
+          );
+        }
+      }
+    }
+
+    if (pendingJobs.length === 0) {
+      console.log("✅ No jobs ready to execute at this time");
+    }
+  } catch (error) {
+    console.error("❌ Error processing scheduled jobs:", error);
+  }
+};
+
+// Clean up jobs that have been stuck in "running" state for too long
+const cleanupStuckJobs = async () => {
+  try {
+    const db = require("./database/db");
+
+    // Find jobs that have been "running" for more than 15 minutes
+    const stuckJobs = db
+      .prepare(
+        `
+      SELECT id, from_username, schedule_time, created_at
+      FROM scheduled_jobs 
+      WHERE status = 'running' 
+      AND datetime(created_at, '+15 minutes') < datetime('now')
+    `
+      )
+      .all();
+
+    if (stuckJobs.length > 0) {
+      console.log(`Found ${stuckJobs.length} stuck jobs, marking as failed...`);
+
+      for (const job of stuckJobs) {
+        console.log(`Cleaning up stuck job #${job.id} (${job.from_username})`);
         await updateJobStatus(job.id, "failed");
       }
     }
   } catch (error) {
-    console.error("Error processing scheduled jobs:", error);
+    console.error("Error cleaning up stuck jobs:", error.message);
   }
 };
 
-// Initialize the scheduler
-const initializeScheduler = () => {
-  console.log("Initializing DM scheduler...");
+// Initialize scheduler and clean up stuck jobs
+const initializeScheduler = async () => {
+  console.log("🚀 Initializing DM scheduler...");
 
-  // Run every minute
+  // Clean up any stuck jobs from previous runs
+  await cleanupStuckJobs();
+
+  // Start the job checker
+  console.log("📅 Starting scheduled job checker (runs every minute)");
+
+  // Run immediately then every minute
+  await checkPendingJobs();
+
+  // Schedule to run every minute
   cron.schedule("* * * * *", checkPendingJobs);
 
-  // Run immediately on startup
-  checkPendingJobs();
-
-  console.log("Scheduler initialized successfully");
+  console.log("✅ Scheduler initialized successfully");
 };
 
 module.exports = {
   initializeScheduler,
   processJob,
+  processSingleMessage,
+  cleanupStuckJobs,
   RATE_LIMITS,
 };

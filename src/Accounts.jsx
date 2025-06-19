@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   FaInstagram,
   FaPlus,
@@ -77,6 +77,29 @@ const Accounts = () => {
       fetchRateLimits();
     }
   }, [activeTab]);
+
+  // Memoized handlers for form inputs
+  const handleNewAccountChange = useCallback((field, value) => {
+    setNewAccount((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  }, []);
+
+  const handleNewProxyChange = useCallback((field, value) => {
+    setNewProxy((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  }, []);
+
+  const handleNewRateLimitChange = useCallback((field, value) => {
+    setNewRateLimit((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  }, []);
+
   const fetchAccounts = async () => {
     try {
       setLoading(true);
@@ -472,10 +495,7 @@ const Accounts = () => {
                       type="text"
                       value={newAccount.username}
                       onChange={(e) =>
-                        setNewAccount({
-                          ...newAccount,
-                          username: e.target.value,
-                        })
+                        handleNewAccountChange("username", e.target.value)
                       }
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500"
                       placeholder="@username"
@@ -490,10 +510,7 @@ const Accounts = () => {
                       type="password"
                       value={newAccount.password}
                       onChange={(e) =>
-                        setNewAccount({
-                          ...newAccount,
-                          password: e.target.value,
-                        })
+                        handleNewAccountChange("password", e.target.value)
                       }
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500"
                       placeholder="Password"
@@ -508,7 +525,7 @@ const Accounts = () => {
                       type="text"
                       value={newAccount.proxy}
                       onChange={(e) =>
-                        setNewAccount({ ...newAccount, proxy: e.target.value })
+                        handleNewAccountChange("proxy", e.target.value)
                       }
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500"
                       placeholder="proxy:port"
@@ -522,10 +539,10 @@ const Accounts = () => {
                       type="number"
                       value={newAccount.dailyLimit}
                       onChange={(e) =>
-                        setNewAccount({
-                          ...newAccount,
-                          dailyLimit: parseInt(e.target.value),
-                        })
+                        handleNewAccountChange(
+                          "dailyLimit",
+                          parseInt(e.target.value)
+                        )
                       }
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500"
                       min="1"
@@ -539,7 +556,7 @@ const Accounts = () => {
                     <textarea
                       value={newAccount.notes}
                       onChange={(e) =>
-                        setNewAccount({ ...newAccount, notes: e.target.value })
+                        handleNewAccountChange("notes", e.target.value)
                       }
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500"
                       rows="3"

@@ -5,6 +5,7 @@ const LeadsService = require("./leads");
 const AccountsService = require("./accounts");
 const ScrapingService = require("./scraping");
 const ProxyService = require("./proxies");
+const AutomationService = require("./automation");
 const { AnalyticsService } = require("./analytics");
 const { RateLimitService } = require("./ratelimits");
 
@@ -16,6 +17,7 @@ module.exports = {
   AccountsService,
   ScrapingService,
   ProxyService,
+  AutomationService,
   AnalyticsService,
   RateLimitService,
 };
