@@ -50,7 +50,6 @@ function getContacts(filters = {}) {
   }
 
   query += " GROUP BY c.id ORDER BY c.last_interaction DESC NULLS LAST";
-
   const contacts = db.prepare(query).all(params);
   return contacts.map((contact) => ({
     ...contact,
@@ -60,9 +59,14 @@ function getContacts(filters = {}) {
           .split(",")
           .map((note) => {
             try {
+              // Skip empty or null note strings
+              if (!note || note === "null" || note.trim() === "") {
+                return null;
+              }
+
               const parsed = JSON.parse(note);
-              // Only include notes that have valid content
-              if (parsed && parsed.content) {
+              // Only include notes that have valid content and aren't just null values
+              if (parsed && parsed.content && parsed.content !== null) {
                 return parsed;
               }
               return null;

@@ -574,20 +574,6 @@ class AutomationService {
     );
   }
 
-  // Simplified method for recording automation rule executions
-  static recordExecution(ruleId, contactUsername, executionData) {
-    return this.logAutomationExecution(
-      ruleId,
-      null, // sequenceId
-      contactUsername, // using username as contactId for now
-      'rule',
-      executionData,
-      'automated_response',
-      executionData.status || 'success',
-      executionData.error || null
-    );
-  }
-
   // ============================================
   // ANALYTICS & METRICS
   // ============================================

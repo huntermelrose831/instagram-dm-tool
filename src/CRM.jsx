@@ -404,6 +404,7 @@ const CRM = () => {
                       Notes
                     </label>
                     <div className="space-y-2 mb-3 max-h-32 overflow-y-auto">
+                      {" "}
                       {selectedContact.notes &&
                       selectedContact.notes.length > 0 ? (
                         selectedContact.notes.map((note, index) => (
@@ -411,7 +412,9 @@ const CRM = () => {
                             key={index}
                             className="bg-gray-50 p-2 rounded text-sm text-black"
                           >
-                            {note}
+                            {typeof note === "string"
+                              ? note
+                              : note?.content || note}
                           </div>
                         ))
                       ) : (
