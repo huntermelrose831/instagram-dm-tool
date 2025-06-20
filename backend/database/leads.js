@@ -176,6 +176,114 @@ class LeadsService {
     insertMany(leadsArray);
     return leadsArray.length;
   }
+
+  // Get lead by username
+  static getLeadByUsername(username) {
+    const stmt = db.prepare(`
+      SELECT * FROM leads 
+      WHERE username = ?
+    `);
+    return stmt.get(username);
+  }
+
+  // Add/create a lead (alias for createLead with simpler interface)
+  static addLead(leadData) {
+    try {
+      return this.createLead(leadData);
+    } catch (error) {
+      // If lead already exists, return existing lead
+      if (error.message.includes("UNIQUE constraint failed")) {
+        return this.getLeadByUsername(leadData.username);
+      }
+      throw error;
+    }
+  }
+
+  // Update a lead
+  static updateLead(id, updateData) {
+    const fields = [];
+    const values = [];
+
+    // Build dynamic update query based on provided fields
+    if (updateData.fullName !== undefined) {
+      fields.push("full_name = ?");
+      values.push(updateData.fullName);
+    }
+    if (updateData.followers !== undefined) {
+      fields.push("followers_count = ?");
+      values.push(updateData.followers);
+    }
+    if (updateData.following !== undefined) {
+      fields.push("following_count = ?");
+      values.push(updateData.following);
+    }
+    if (updateData.posts !== undefined) {
+      fields.push("posts_count = ?");
+      values.push(updateData.posts);
+    }
+    if (updateData.engagementRate !== undefined) {
+      fields.push("engagement_rate = ?");
+      values.push(updateData.engagementRate);
+    }
+    if (updateData.location !== undefined) {
+      fields.push("location = ?");
+      values.push(updateData.location);
+    }
+    if (updateData.bio !== undefined) {
+      fields.push("bio = ?");
+      values.push(updateData.bio);
+    }
+    if (updateData.isVerified !== undefined) {
+      fields.push("is_verified = ?");
+      values.push(updateData.isVerified ? 1 : 0);
+    }
+    if (updateData.hasProfilePic !== undefined) {
+      fields.push("has_profile_pic = ?");
+      values.push(updateData.hasProfilePic ? 1 : 0);
+    }
+    if (updateData.hasWebsite !== undefined) {
+      fields.push("has_website = ?");
+      values.push(updateData.hasWebsite ? 1 : 0);
+    }
+    if (updateData.tags !== undefined) {
+      fields.push("tags = ?");
+      values.push(JSON.stringify(updateData.tags));
+    }
+    if (updateData.status !== undefined) {
+      fields.push("status = ?");
+      values.push(updateData.status);
+    }
+    if (updateData.isTarget !== undefined) {
+      fields.push("is_target = ?");
+      values.push(updateData.isTarget ? 1 : 0);
+    }
+
+    if (fields.length === 0) {
+      return false; // No fields to update
+    }
+
+    // Add updated_at timestamp
+    fields.push("updated_at = CURRENT_TIMESTAMP");
+    values.push(id);
+
+    const stmt = db.prepare(`
+      UPDATE leads 
+      SET ${fields.join(", ")}
+      WHERE id = ?
+    `);
+
+    const result = stmt.run(...values);
+    return result.changes > 0;
+  }
+
+  // Get scraped leads (alias for getLeads with source filter)
+  static getScrapedLeads(filters = {}) {
+    // Default to scraped leads only unless explicitly requesting all
+    if (!filters.source) {
+      filters.source = "scraping";
+    }
+    return this.getLeads(filters);
+  }
 }
 
 module.exports = LeadsService;

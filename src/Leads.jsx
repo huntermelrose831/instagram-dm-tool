@@ -279,13 +279,11 @@ const Leads = () => {
               : "query"]: searchInput,
         }),
       });
-
       const data = await response.json();
       if (data.status === "success") {
-        setLeads(data.leads || data.usernames || []);
-        setSuccess(
-          `Found ${data.leads?.length || data.usernames?.length || 0} leads!`
-        );
+        const leadsData = data.leads || data.usernames || [];
+        setLeads(leadsData);
+        setSuccess(`Found ${leadsData.length} leads!`);
       } else {
         setError(data.message || "Failed to fetch leads");
       }
@@ -323,11 +321,15 @@ const Leads = () => {
       setError("Failed to add to targets");
     }
   };
-
   const addAllToTargets = async () => {
-    const unadded = leads.filter((lead) => !addedLeads.has(lead));
+    const unadded = leads.filter((lead) => {
+      const username = typeof lead === "string" ? lead : lead.username;
+      return !addedLeads.has(username);
+    });
+
     for (const lead of unadded) {
-      await addToTargets(lead);
+      const username = typeof lead === "string" ? lead : lead.username;
+      await addToTargets(username);
     }
   };
   const exportLeads = (source = "discovery", format = "json") => {
@@ -594,27 +596,41 @@ const Leads = () => {
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-96 overflow-y-auto">
-                      {leads.map((lead, index) => (
-                        <div
-                          key={index}
-                          className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg p-3 hover:bg-gray-100 transition-colors"
-                        >
-                          <span className="text-black font-medium">
-                            @{lead}
-                          </span>
-                          <button
-                            onClick={() => addToTargets(lead)}
-                            disabled={addedLeads.has(lead)}
-                            className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
-                              addedLeads.has(lead)
-                                ? "bg-green-100 text-green-600 cursor-not-allowed"
-                                : "bg-purple-100 text-purple-600 hover:bg-purple-200"
-                            }`}
+                      {leads.map((lead, index) => {
+                        // Handle both string and object formats
+                        const username =
+                          typeof lead === "string" ? lead : lead.username;
+                        const leadKey = username || `lead-${index}`;
+
+                        return (
+                          <div
+                            key={leadKey}
+                            className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg p-3 hover:bg-gray-100 transition-colors"
                           >
-                            {addedLeads.has(lead) ? "Added" : "Add"}
-                          </button>
-                        </div>
-                      ))}
+                            <div className="flex-1">
+                              <span className="text-black font-medium">
+                                @{username}
+                              </span>
+                              {typeof lead === "object" && lead.comment && (
+                                <p className="text-xs text-gray-600 mt-1 truncate">
+                                  {lead.comment}
+                                </p>
+                              )}
+                            </div>
+                            <button
+                              onClick={() => addToTargets(username)}
+                              disabled={addedLeads.has(username)}
+                              className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
+                                addedLeads.has(username)
+                                  ? "bg-green-100 text-green-600 cursor-not-allowed"
+                                  : "bg-purple-100 text-purple-600 hover:bg-purple-200"
+                              }`}
+                            >
+                              {addedLeads.has(username) ? "Added" : "Add"}
+                            </button>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>

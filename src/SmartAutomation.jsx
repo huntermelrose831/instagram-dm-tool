@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, memo } from "react";
 import {
   FaRobot,
   FaPlay,
@@ -17,6 +17,142 @@ import {
   FaSave,
   FaTimes,
 } from "react-icons/fa";
+
+// Extract modal components outside to prevent re-creation
+const CreateRuleModal = memo(
+  ({
+    newRule,
+    isLoading,
+    updateNewRule,
+    setShowCreateModal,
+    createAutomationRule,
+  }) => (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-xl font-bold text-gray-900">
+            Create Automation Rule
+          </h2>
+          <button
+            onClick={() => setShowCreateModal(false)}
+            className="p-2 text-gray-500 hover:text-gray-700 rounded-lg hover:bg-gray-100"
+          >
+            <FaTimes />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Rule Name
+            </label>
+            <input
+              type="text"
+              value={newRule.name}
+              onChange={(e) => updateNewRule("name", e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="Welcome Message Rule"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Trigger Type
+              </label>
+              <select
+                value={newRule.trigger_type}
+                onChange={(e) => updateNewRule("trigger_type", e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="keyword">Keyword</option>
+                <option value="first_message">First Message</option>
+                <option value="message_count">Message Count</option>
+                <option value="time_based">Time Based</option>
+                <option value="sentiment">Sentiment</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Trigger Value
+              </label>
+              <input
+                type="text"
+                value={newRule.trigger_value}
+                onChange={(e) => updateNewRule("trigger_value", e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="hello, hi, info"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Response Template
+            </label>
+            <textarea
+              value={newRule.response_template}
+              onChange={(e) =>
+                updateNewRule("response_template", e.target.value)
+              }
+              rows={4}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              placeholder="Hello! Thanks for reaching out. How can I help you today?"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Priority (1-10)
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="10"
+                value={newRule.priority}
+                onChange={(e) =>
+                  updateNewRule("priority", parseInt(e.target.value))
+                }
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+
+            <div className="flex items-center">
+              <label className="flex items-center">
+                <input
+                  type="checkbox"
+                  checked={newRule.is_active}
+                  onChange={(e) => updateNewRule("is_active", e.target.checked)}
+                  className="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
+                />
+                <span className="ml-2 text-sm text-gray-700">Active</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-3 mt-6 pt-6 border-t border-gray-200">
+          <button
+            onClick={() => setShowCreateModal(false)}
+            className="px-4 py-2 text-gray-600 hover:text-gray-800"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={createAutomationRule}
+            disabled={!newRule.name.trim() || isLoading}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+          >
+            <FaSave />
+            {isLoading ? "Creating..." : "Create Rule"}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+);
 
 const SmartAutomation = () => {
   // Main state
@@ -51,6 +187,21 @@ const SmartAutomation = () => {
     steps: [],
     is_active: true,
   });
+
+  // Memoized handlers to prevent input unfocusing
+  const updateNewRule = useCallback((field, value) => {
+    setNewRule((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  }, []);
+
+  const updateNewSequence = useCallback((field, value) => {
+    setNewSequence((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  }, []);
 
   useEffect(() => {
     fetchAllData();
@@ -278,28 +429,25 @@ const SmartAutomation = () => {
       is_active: true,
     });
   };
-
   const addSequenceStep = () => {
-    setNewSequence({
-      ...newSequence,
-      steps: [
-        ...newSequence.steps,
-        {
-          step_number: newSequence.steps.length + 1,
-          delay_hours: 24,
-          message_template: "",
-          conditions: {},
-        },
-      ],
-    });
+    const newSteps = [
+      ...newSequence.steps,
+      {
+        step_number: newSequence.steps.length + 1,
+        delay_hours: 24,
+        message_template: "",
+        conditions: {},
+      },
+    ];
+    updateNewSequence("steps", newSteps);
   };
-
   const removeSequenceStep = (index) => {
     const updatedSteps = newSequence.steps.filter((_, i) => i !== index);
-    setNewSequence({
-      ...newSequence,
-      steps: updatedSteps.map((step, i) => ({ ...step, step_number: i + 1 })),
-    });
+    const renumberedSteps = updatedSteps.map((step, i) => ({
+      ...step,
+      step_number: i + 1,
+    }));
+    updateNewSequence("steps", renumberedSteps);
   };
   const AutomationRuleCard = ({ rule }) => (
     <div className="bg-white rounded-lg border border-gray-200 p-6 shadow-sm">
@@ -477,110 +625,148 @@ const SmartAutomation = () => {
       </div>
     </div>
   );
-  const CreateRuleModal = () => (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-bold text-gray-900">
-            Create Automation Rule
-          </h2>
-          <button
-            onClick={() => setShowCreateModal(false)}
-            className="p-2 text-gray-500 hover:text-gray-700 rounded-lg hover:bg-gray-100"
-          >
-            <FaTimes />
-          </button>
-        </div>
 
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Rule Name
-            </label>
-            <input
-              type="text"
-              value={newRule.name}
-              onChange={(e) => setNewRule({ ...newRule, name: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="Welcome Message Rule"
-            />
+  const CreateSequenceModal = useCallback(
+    () => (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="bg-white rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-xl font-bold text-gray-900">
+              Create Follow-up Sequence
+            </h2>
+            <button
+              onClick={() => setShowSequenceModal(false)}
+              className="p-2 text-gray-500 hover:text-gray-700 rounded-lg hover:bg-gray-100"
+            >
+              <FaTimes />
+            </button>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Trigger Type
-              </label>
-              <select
-                value={newRule.trigger_type}
-                onChange={(e) =>
-                  setNewRule({ ...newRule, trigger_type: e.target.value })
-                }
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="keyword">Keyword</option>
-                <option value="first_message">First Message</option>
-                <option value="message_count">Message Count</option>
-                <option value="time_based">Time Based</option>
-                <option value="sentiment">Sentiment</option>
-              </select>
+          <div className="space-y-6">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Sequence Name
+                </label>
+                <input
+                  type="text"
+                  value={newSequence.name}
+                  onChange={(e) => updateNewSequence("name", e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="Welcome Sequence"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Trigger Event
+                </label>
+                <select
+                  value={newSequence.trigger_event}
+                  onChange={(e) =>
+                    updateNewSequence("trigger_event", e.target.value)
+                  }
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="new_conversation">New Conversation</option>
+                  <option value="no_response">No Response</option>
+                  <option value="keyword_match">Keyword Match</option>
+                  <option value="lead_qualified">Lead Qualified</option>
+                </select>
+              </div>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Trigger Value
-              </label>
-              <input
-                type="text"
-                value={newRule.trigger_value}
-                onChange={(e) =>
-                  setNewRule({ ...newRule, trigger_value: e.target.value })
-                }
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="hello, hi, info"
-              />
-            </div>
-          </div>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900">
+                  Sequence Steps
+                </h3>
+                <button
+                  onClick={addSequenceStep}
+                  className="px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-1 text-sm"
+                >
+                  <FaPlus />
+                  Add Step
+                </button>
+              </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Response Template
-            </label>
-            <textarea
-              value={newRule.response_template}
-              onChange={(e) =>
-                setNewRule({ ...newRule, response_template: e.target.value })
-              }
-              rows={4}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="Hello! Thanks for reaching out. How can I help you today?"
-            />
-          </div>
+              <div className="space-y-4">
+                {newSequence.steps.map((step, index) => (
+                  <div
+                    key={index}
+                    className="border border-gray-200 rounded-lg p-4"
+                  >
+                    <div className="flex items-center justify-between mb-3">
+                      <h4 className="font-medium text-gray-900">
+                        Step {step.step_number}
+                      </h4>
+                      <button
+                        onClick={() => removeSequenceStep(index)}
+                        className="text-red-600 hover:text-red-800"
+                      >
+                        <FaTrash />
+                      </button>
+                    </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Priority (1-10)
-              </label>
-              <input
-                type="number"
-                min="1"
-                max="10"
-                value={newRule.priority}
-                onChange={(e) =>
-                  setNewRule({ ...newRule, priority: parseInt(e.target.value) })
-                }
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
+                    <div className="grid grid-cols-2 gap-4 mb-3">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                          Delay (hours)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={step.delay_hours}
+                          onChange={(e) => {
+                            const updatedSteps = [...newSequence.steps];
+                            updatedSteps[index].delay_hours = parseInt(
+                              e.target.value
+                            );
+                            updateNewSequence("steps", updatedSteps);
+                          }}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Message Template
+                      </label>
+                      <textarea
+                        value={step.message_template}
+                        onChange={(e) => {
+                          const updatedSteps = [...newSequence.steps];
+                          updatedSteps[index].message_template = e.target.value;
+                          updateNewSequence("steps", updatedSteps);
+                        }}
+                        rows={3}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        placeholder="Follow-up message template..."
+                      />
+                    </div>
+                  </div>
+                ))}
+
+                {newSequence.steps.length === 0 && (
+                  <div className="text-center py-8 text-gray-500">
+                    <FaClock className="mx-auto text-4xl mb-2" />
+                    <p>
+                      No steps added yet. Click "Add Step" to create your
+                      sequence.
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="flex items-center">
               <label className="flex items-center">
                 <input
                   type="checkbox"
-                  checked={newRule.is_active}
+                  checked={newSequence.is_active}
                   onChange={(e) =>
-                    setNewRule({ ...newRule, is_active: e.target.checked })
+                    updateNewSequence("is_active", e.target.checked)
                   }
                   className="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
                 />
@@ -588,205 +774,27 @@ const SmartAutomation = () => {
               </label>
             </div>
           </div>
-        </div>
 
-        <div className="flex items-center justify-end gap-3 mt-6 pt-6 border-t border-gray-200">
-          <button
-            onClick={() => setShowCreateModal(false)}
-            className="px-4 py-2 text-gray-600 hover:text-gray-800"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={createAutomationRule}
-            disabled={isLoading}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
-          >
-            <FaSave />
-            {isLoading ? "Creating..." : "Create Rule"}
-          </button>
+          <div className="flex items-center justify-end gap-3 mt-6 pt-6 border-t border-gray-200">
+            <button
+              onClick={() => setShowSequenceModal(false)}
+              className="px-4 py-2 text-gray-600 hover:text-gray-800"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={createAutomationSequence}
+              disabled={isLoading}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+            >
+              <FaSave />
+              {isLoading ? "Creating..." : "Create Sequence"}
+            </button>{" "}
+          </div>
         </div>
       </div>
-    </div>
-  );
-
-  const CreateSequenceModal = () => (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-bold text-gray-900">
-            Create Follow-up Sequence
-          </h2>
-          <button
-            onClick={() => setShowSequenceModal(false)}
-            className="p-2 text-gray-500 hover:text-gray-700 rounded-lg hover:bg-gray-100"
-          >
-            <FaTimes />
-          </button>
-        </div>
-
-        <div className="space-y-6">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Sequence Name
-              </label>
-              <input
-                type="text"
-                value={newSequence.name}
-                onChange={(e) =>
-                  setNewSequence({ ...newSequence, name: e.target.value })
-                }
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Welcome Sequence"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Trigger Event
-              </label>
-              <select
-                value={newSequence.trigger_event}
-                onChange={(e) =>
-                  setNewSequence({
-                    ...newSequence,
-                    trigger_event: e.target.value,
-                  })
-                }
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="new_conversation">New Conversation</option>
-                <option value="no_response">No Response</option>
-                <option value="keyword_match">Keyword Match</option>
-                <option value="lead_qualified">Lead Qualified</option>
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900">
-                Sequence Steps
-              </h3>
-              <button
-                onClick={addSequenceStep}
-                className="px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-1 text-sm"
-              >
-                <FaPlus />
-                Add Step
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              {newSequence.steps.map((step, index) => (
-                <div
-                  key={index}
-                  className="border border-gray-200 rounded-lg p-4"
-                >
-                  <div className="flex items-center justify-between mb-3">
-                    <h4 className="font-medium text-gray-900">
-                      Step {step.step_number}
-                    </h4>
-                    <button
-                      onClick={() => removeSequenceStep(index)}
-                      className="text-red-600 hover:text-red-800"
-                    >
-                      <FaTrash />
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4 mb-3">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Delay (hours)
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={step.delay_hours}
-                        onChange={(e) => {
-                          const updatedSteps = [...newSequence.steps];
-                          updatedSteps[index].delay_hours = parseInt(
-                            e.target.value
-                          );
-                          setNewSequence({
-                            ...newSequence,
-                            steps: updatedSteps,
-                          });
-                        }}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Message Template
-                    </label>
-                    <textarea
-                      value={step.message_template}
-                      onChange={(e) => {
-                        const updatedSteps = [...newSequence.steps];
-                        updatedSteps[index].message_template = e.target.value;
-                        setNewSequence({ ...newSequence, steps: updatedSteps });
-                      }}
-                      rows={3}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder="Follow-up message template..."
-                    />
-                  </div>
-                </div>
-              ))}
-
-              {newSequence.steps.length === 0 && (
-                <div className="text-center py-8 text-gray-500">
-                  <FaClock className="mx-auto text-4xl mb-2" />
-                  <p>
-                    No steps added yet. Click "Add Step" to create your
-                    sequence.
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="flex items-center">
-            <label className="flex items-center">
-              <input
-                type="checkbox"
-                checked={newSequence.is_active}
-                onChange={(e) =>
-                  setNewSequence({
-                    ...newSequence,
-                    is_active: e.target.checked,
-                  })
-                }
-                className="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
-              />
-              <span className="ml-2 text-sm text-gray-700">Active</span>
-            </label>
-          </div>
-        </div>
-
-        <div className="flex items-center justify-end gap-3 mt-6 pt-6 border-t border-gray-200">
-          <button
-            onClick={() => setShowSequenceModal(false)}
-            className="px-4 py-2 text-gray-600 hover:text-gray-800"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={createAutomationSequence}
-            disabled={isLoading}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
-          >
-            <FaSave />
-            {isLoading ? "Creating..." : "Create Sequence"}
-          </button>
-        </div>
-      </div>
-    </div>
+    ),
+    [newSequence, isLoading, updateNewSequence]
   );
 
   return (
@@ -1228,7 +1236,15 @@ const SmartAutomation = () => {
         </div>
       </div>{" "}
       {/* Modals */}
-      {showCreateModal && <CreateRuleModal />}
+      {showCreateModal && (
+        <CreateRuleModal
+          newRule={newRule}
+          isLoading={isLoading}
+          updateNewRule={updateNewRule}
+          setShowCreateModal={setShowCreateModal}
+          createAutomationRule={createAutomationRule}
+        />
+      )}
       {showSequenceModal && <CreateSequenceModal />}
     </div>
   );

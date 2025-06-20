@@ -142,7 +142,6 @@ class AutomationService {
       keywords: detectedKeywords,
     };
   }
-
   // ============================================
   // AUTOMATION RULES MANAGEMENT
   // ============================================
@@ -150,17 +149,28 @@ class AutomationService {
   static createAutomationRule(ruleData) {
     const stmt = db.prepare(`
       INSERT INTO automation_rules 
-      (name, trigger_type, trigger_conditions, action_type, action_data, priority)
-      VALUES (?, ?, ?, ?, ?, ?)
+      (name, trigger_type, trigger_conditions, action_type, action_parameters, priority, is_active)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
+
+    // Map frontend field names to what we need
+    const triggerConditions = {
+      trigger_value: ruleData.trigger_value || "",
+      conditions: ruleData.conditions || {},
+    };
+
+    const actionParameters = {
+      response_template: ruleData.response_template || "",
+    };
 
     return stmt.run(
       ruleData.name,
-      ruleData.triggerType,
-      JSON.stringify(ruleData.triggerConditions),
-      ruleData.actionType,
-      JSON.stringify(ruleData.actionData),
-      ruleData.priority || 0
+      ruleData.trigger_type,
+      JSON.stringify(triggerConditions),
+      "send_message", // Default action type
+      JSON.stringify(actionParameters),
+      ruleData.priority || 1,
+      ruleData.is_active ? 1 : 0
     );
   }
 
@@ -173,11 +183,10 @@ class AutomationService {
 
     const stmt = db.prepare(query);
     const rules = stmt.all();
-
     return rules.map((rule) => ({
       ...rule,
       triggerConditions: JSON.parse(rule.trigger_conditions),
-      actionData: JSON.parse(rule.action_data),
+      actionData: JSON.parse(rule.action_parameters),
     }));
   }
 
@@ -464,18 +473,19 @@ class AutomationService {
       },
     };
   }
-
   static getHighValueLeads(limit = 50) {
     const stmt = db.prepare(`
       SELECT 
         c.*,
-        ls.total_score,
-        ls.conversion_probability,
-        ls.last_calculated
+        ls.engagement_score,
+        ls.response_probability,
+        ls.conversion_score,
+        ls.last_activity,
+        (ls.engagement_score + ls.conversion_score + ROUND(ls.response_probability * 100)) as total_score
       FROM crm_contacts c
-      LEFT JOIN lead_scores ls ON c.id = ls.contact_id
-      WHERE ls.conversion_probability > 0.5
-      ORDER BY ls.conversion_probability DESC, ls.total_score DESC
+      LEFT JOIN lead_scores ls ON c.username = ls.username
+      WHERE ls.response_probability > 0.5
+      ORDER BY ls.response_probability DESC, (ls.engagement_score + ls.conversion_score) DESC
       LIMIT ?
     `);
 
@@ -564,6 +574,20 @@ class AutomationService {
     );
   }
 
+  // Simplified method for recording automation rule executions
+  static recordExecution(ruleId, contactUsername, executionData) {
+    return this.logAutomationExecution(
+      ruleId,
+      null, // sequenceId
+      contactUsername, // using username as contactId for now
+      'rule',
+      executionData,
+      'automated_response',
+      executionData.status || 'success',
+      executionData.error || null
+    );
+  }
+
   // ============================================
   // ANALYTICS & METRICS
   // ============================================
@@ -572,29 +596,27 @@ class AutomationService {
     const daysBack = timeframe === "7d" ? 7 : timeframe === "30d" ? 30 : 90;
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - daysBack);
-
     const stmt = db.prepare(`
       SELECT 
         COUNT(*) as total_executions,
-        SUM(CASE WHEN result = 'success' THEN 1 ELSE 0 END) as successful_executions,
-        COUNT(DISTINCT contact_id) as unique_contacts_reached,
-        action_taken,
-        DATE(created_at) as execution_date
+        SUM(CASE WHEN execution_status = 'completed' THEN 1 ELSE 0 END) as successful_executions,
+        COUNT(DISTINCT contact_username) as unique_contacts_reached,
+        trigger_event,
+        DATE(executed_at) as execution_date
       FROM automation_executions
-      WHERE created_at >= ?
-      GROUP BY action_taken, DATE(created_at)
+      WHERE executed_at >= ?
+      GROUP BY trigger_event, DATE(executed_at)
       ORDER BY execution_date DESC
     `);
 
     return stmt.all(startDate.toISOString());
   }
-
   static getSequencePerformance() {
     const stmt = db.prepare(`
       SELECT 
         s.*,
         COUNT(ae.id) as total_executions,
-        SUM(CASE WHEN ae.result = 'success' THEN 1 ELSE 0 END) as successful_executions
+        SUM(CASE WHEN ae.execution_status = 'completed' THEN 1 ELSE 0 END) as successful_executions
       FROM automation_sequences s
       LEFT JOIN automation_executions ae ON s.id = ae.sequence_id
       GROUP BY s.id
@@ -603,14 +625,13 @@ class AutomationService {
 
     return stmt.all();
   }
-
   static getRulePerformance() {
     const stmt = db.prepare(`
       SELECT 
         r.*,
         COUNT(ae.id) as total_executions,
-        SUM(CASE WHEN ae.result = 'success' THEN 1 ELSE 0 END) as successful_executions,
-        ROUND(AVG(CASE WHEN ae.result = 'success' THEN 100.0 ELSE 0.0 END), 2) as success_rate
+        SUM(CASE WHEN ae.execution_status = 'completed' THEN 1 ELSE 0 END) as successful_executions,
+        ROUND(AVG(CASE WHEN ae.execution_status = 'completed' THEN 100.0 ELSE 0.0 END), 2) as success_rate
       FROM automation_rules r
       LEFT JOIN automation_executions ae ON r.id = ae.rule_id
       GROUP BY r.id

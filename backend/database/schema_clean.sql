@@ -92,6 +92,30 @@ CREATE TABLE IF NOT EXISTS scheduled_jobs (
     FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE
 );
 
+-- Leads table
+CREATE TABLE IF NOT EXISTS leads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    full_name TEXT,
+    followers_count INTEGER,
+    following_count INTEGER,
+    posts_count INTEGER,
+    engagement_rate REAL,
+    location TEXT,
+    bio TEXT,
+    is_verified BOOLEAN DEFAULT 0,
+    has_profile_pic BOOLEAN DEFAULT 1,
+    has_website BOOLEAN DEFAULT 0,
+    tags TEXT DEFAULT '[]',
+    source TEXT DEFAULT 'manual',
+    source_details TEXT,
+    scraping_job_id INTEGER,
+    status TEXT DEFAULT 'new' CHECK(status IN ('new', 'contacted', 'responded', 'converted', 'ignored')),
+    is_target BOOLEAN DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 -- DM logs table
 CREATE TABLE IF NOT EXISTS dm_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -220,5 +244,13 @@ AFTER UPDATE ON follow_up_schedules
 FOR EACH ROW
 BEGIN
     UPDATE follow_up_schedules SET updated_at = CURRENT_TIMESTAMP
+    WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS update_leads_timestamp
+AFTER UPDATE ON leads
+FOR EACH ROW
+BEGIN
+    UPDATE leads SET updated_at = CURRENT_TIMESTAMP
     WHERE id = NEW.id;
 END;

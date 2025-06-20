@@ -403,19 +403,33 @@ function updateTargetStatus(campaignId, username, status, contactedAt = null) {
 }
 
 // Campaign replies management
-function addCampaignReply(campaignId, username, message, isRead = false) {
+function addCampaignReply(
+  campaignId,
+  username,
+  messageContent,
+  replyContent,
+  sentiment = null,
+  isRead = false
+) {
   const stmt = db.prepare(`
-    INSERT INTO campaign_replies (campaign_id, username, message, is_read, created_at)
-    VALUES (?, ?, ?, ?, datetime('now'))
+    INSERT INTO campaign_replies (campaign_id, username, message_content, reply_content, sentiment, is_read, received_at, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
   `);
 
-  const result = stmt.run(campaignId, username, message, isRead ? 1 : 0);
+  const result = stmt.run(
+    campaignId,
+    username,
+    messageContent,
+    replyContent,
+    sentiment,
+    isRead ? 1 : 0
+  );
   return result.lastInsertRowid;
 }
 
 function getCampaignReplies(campaignId) {
   const stmt = db.prepare(`
-    SELECT id, username, message, is_read, created_at
+    SELECT id, username, message_content, reply_content, sentiment, is_read, received_at, created_at
     FROM campaign_replies 
     WHERE campaign_id = ?
     ORDER BY created_at DESC

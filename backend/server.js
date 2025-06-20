@@ -37,6 +37,9 @@ const {
   RateLimitService,
 } = require("./database");
 
+// Import message monitoring system
+const { messageMonitor } = require("./messageMonitor");
+
 const app = express();
 const PORT = 5000;
 require("dotenv").config();

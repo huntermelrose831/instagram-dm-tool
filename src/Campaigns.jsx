@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, memo } from "react";
 import { motion } from "framer-motion";
 import {
   MdAdd,
@@ -17,6 +17,101 @@ import {
   MdCheck,
   MdClose,
 } from "react-icons/md";
+
+// Extract modal component outside to prevent re-creation
+const CreateCampaignModal = memo(
+  ({
+    newCampaign,
+    accounts,
+    handleNewCampaignChange,
+    setShowCreateModal,
+    createCampaign,
+  }) => (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div className="bg-gray-900 rounded-lg p-6 w-96 border border-gray-700">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-white">
+            Create New Campaign
+          </h3>
+          <button
+            onClick={() => setShowCreateModal(false)}
+            className="text-gray-400 hover:text-white"
+          >
+            <MdClose size={20} />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Campaign Name *
+            </label>
+            <input
+              type="text"
+              value={newCampaign.name}
+              onChange={(e) => handleNewCampaignChange("name", e.target.value)}
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white focus:border-green-500 focus:outline-none"
+              placeholder="Enter campaign name"
+              autoFocus
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Account
+            </label>
+            <select
+              value={newCampaign.account_username}
+              onChange={(e) =>
+                handleNewCampaignChange("account_username", e.target.value)
+              }
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white focus:border-green-500 focus:outline-none"
+            >
+              <option value="">Select Account</option>
+              {accounts.map((account) => (
+                <option key={account.username} value={account.username}>
+                  @{account.username}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Daily Limit
+            </label>
+            <input
+              type="number"
+              value={newCampaign.daily_limit}
+              onChange={(e) =>
+                handleNewCampaignChange("daily_limit", parseInt(e.target.value))
+              }
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white focus:border-green-500 focus:outline-none"
+              min="1"
+              max="200"
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-3 mt-6">
+          <button
+            onClick={() => setShowCreateModal(false)}
+            className="px-4 py-2 text-gray-400 hover:text-white transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={createCampaign}
+            disabled={!newCampaign.name.trim()}
+            className="px-4 py-2 bg-green-500 hover:bg-green-400 disabled:bg-gray-600 disabled:text-gray-400 text-black rounded-lg font-medium transition-colors"
+          >
+            Create Campaign
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+);
 
 const Campaigns = () => {
   const [campaigns, setCampaigns] = useState([]);
@@ -933,92 +1028,6 @@ const Campaigns = () => {
     }
   };
 
-  const CreateModal = () => (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-gray-900 rounded-lg p-6 w-96 border border-gray-700">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-white">
-            Create New Campaign
-          </h3>
-          <button
-            onClick={() => setShowCreateModal(false)}
-            className="text-gray-400 hover:text-white"
-          >
-            <MdClose size={20} />
-          </button>
-        </div>
-
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Campaign Name *
-            </label>{" "}
-            <input
-              type="text"
-              value={newCampaign.name}
-              onChange={(e) => handleNewCampaignChange("name", e.target.value)}
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white focus:border-green-500 focus:outline-none"
-              placeholder="Enter campaign name"
-              autoFocus
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Account
-            </label>{" "}
-            <select
-              value={newCampaign.account_username}
-              onChange={(e) =>
-                handleNewCampaignChange("account_username", e.target.value)
-              }
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white focus:border-green-500 focus:outline-none"
-            >
-              <option value="">Select Account</option>
-              {accounts.map((account) => (
-                <option key={account.username} value={account.username}>
-                  @{account.username}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Daily Limit
-            </label>{" "}
-            <input
-              type="number"
-              value={newCampaign.daily_limit}
-              onChange={(e) =>
-                handleNewCampaignChange("daily_limit", parseInt(e.target.value))
-              }
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white focus:border-green-500 focus:outline-none"
-              min="1"
-              max="200"
-            />
-          </div>
-        </div>
-
-        <div className="flex justify-end gap-3 mt-6">
-          <button
-            onClick={() => setShowCreateModal(false)}
-            className="px-4 py-2 text-gray-400 hover:text-white transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={createCampaign}
-            disabled={!newCampaign.name.trim()}
-            className="px-4 py-2 bg-green-500 hover:bg-green-400 disabled:bg-gray-600 disabled:text-gray-400 text-black rounded-lg font-medium transition-colors"
-          >
-            Create Campaign
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-
   if (isLoading) {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center">
@@ -1079,7 +1088,15 @@ const Campaigns = () => {
       </div>
 
       {/* Create Modal */}
-      {showCreateModal && <CreateModal />}
+      {showCreateModal && (
+        <CreateCampaignModal
+          newCampaign={newCampaign}
+          accounts={accounts}
+          handleNewCampaignChange={handleNewCampaignChange}
+          setShowCreateModal={setShowCreateModal}
+          createCampaign={createCampaign}
+        />
+      )}
     </div>
   );
 };
