@@ -31,7 +31,7 @@ function App() {
             <Route path="/targets" element={<Targets />} />
             <Route path="/leads" element={<Leads />} />
             <Route path="/accounts" element={<Accounts />} />
-            <Route path="/campaigns" element={<Campaigns />} />
+            <Route path="/campaigns" element={<Campaigns/>} />
             <Route path="/crm" element={<CRM />} />
             <Route path="/analytics" element={<Analytics />} />
             <Route path="/automation" element={<SmartAutomation />} />

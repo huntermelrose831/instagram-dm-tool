@@ -118,14 +118,25 @@ class RateLimitService {
   // Get all rate limits
   static getAllRateLimits() {
     const stmt = db.prepare(`
-      SELECT * FROM account_limits 
-      ORDER BY username
+      SELECT 
+        al.*,
+        ia.id as accountId,
+        ia.username as accountUsername
+      FROM account_limits al
+      LEFT JOIN instagram_accounts ia ON al.username = ia.username
+      ORDER BY al.username
     `);
 
     const limits = stmt.all();
 
     return limits.map((limit) => ({
-      ...limit,
+      id: limit.id,
+      accountId: limit.accountId,
+      accountUsername: limit.accountUsername || limit.username,
+      dmPerHour: limit.hourly_limit || 10,
+      dmPerDay: limit.daily_limit || 100,
+      followPerHour: limit.follow_per_hour || 20,
+      followPerDay: limit.follow_per_day || 200,
       isActive: !!limit.is_active,
       dailyUsagePercent:
         limit.daily_limit > 0
@@ -252,6 +263,93 @@ class RateLimitService {
 
     const info = stmt.run(username);
     return info.changes > 0;
+  }
+
+  // Create new rate limit
+  static createRateLimit(rateLimitData) {
+    // Generate a unique ID based on timestamp and random number
+    const generatedId = Date.now() + Math.floor(Math.random() * 1000);
+    
+    const stmt = db.prepare(`
+      INSERT INTO account_limits (
+        username, 
+        daily_limit, 
+        hourly_limit, 
+        follow_per_hour,
+        follow_per_day,
+        is_active,
+        id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const info = stmt.run(
+      rateLimitData.username,
+      rateLimitData.dmPerDay || 100,
+      rateLimitData.dmPerHour || 10,
+      rateLimitData.followPerHour || 20,
+      rateLimitData.followPerDay || 200,
+      rateLimitData.isActive ? 1 : 0,
+      generatedId
+    );
+
+    return generatedId;
+  }
+
+  // Update rate limit
+  static updateRateLimit(id, updates) {
+    const stmt = db.prepare(`
+      UPDATE account_limits 
+      SET 
+        daily_limit = ?,
+        hourly_limit = ?,
+        follow_per_hour = ?,
+        follow_per_day = ?,
+        is_active = ?
+      WHERE id = ?
+    `);
+
+    const info = stmt.run(
+      updates.dmPerDay,
+      updates.dmPerHour,
+      updates.followPerHour,
+      updates.followPerDay,
+      updates.isActive ? 1 : 0,
+      id
+    );
+
+    return info.changes > 0;
+  }
+
+  // Delete rate limit
+  static deleteRateLimit(id) {
+    const stmt = db.prepare(`
+      DELETE FROM account_limits WHERE id = ?
+    `);
+
+    const info = stmt.run(id);
+    return info.changes > 0;
+  }
+
+  // Get rate limit by ID
+  static getRateLimitById(id) {
+    const stmt = db.prepare(`
+      SELECT * FROM account_limits WHERE id = ?
+    `);
+
+    const limit = stmt.get(id);
+
+    if (limit) {
+      return {
+        ...limit,
+        isActive: !!limit.is_active,
+        dmPerDay: limit.daily_limit,
+        dmPerHour: limit.hourly_limit,
+        followPerHour: limit.follow_per_hour,
+        followPerDay: limit.follow_per_day,
+      };
+    }
+
+    return null;
   }
 }
 
