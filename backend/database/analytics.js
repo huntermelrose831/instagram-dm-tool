@@ -211,21 +211,33 @@ async function getAnalytics(startDate, endDate) {
 }
 
 function getTotalStats(startDate, endDate) {
+  // Count all DMs, including those not linked to a campaign
   const stmt = db.prepare(`
     SELECT 
       COUNT(DISTINCT ma.campaign_id) as active_campaigns,
       SUM(ma.sent_count) as total_messages,
       SUM(ma.response_count) as total_replies,
       0 as total_views,
-      COUNT(DISTINCT c.account_username) as active_accounts,
+      (
+        SELECT COUNT(DISTINCT account_username)
+        FROM (
+          SELECT account_username FROM campaigns WHERE created_at BETWEEN ? AND ?
+          UNION
+          SELECT account_username FROM message_analytics WHERE created_at BETWEEN ? AND ?
+        )
+      ) as active_accounts,
       ROUND(AVG(ma.success_rate), 2) as reply_rate,
       0 as view_rate
     FROM message_analytics ma
-    LEFT JOIN campaigns c ON ma.campaign_id = c.id
-    WHERE c.created_at BETWEEN ? AND ?
+    WHERE ma.created_at BETWEEN ? AND ?
   `);
 
-  return stmt.get(startDate.toISOString(), endDate.toISOString()) || {};
+  // Pass the date range for both campaign and non-campaign DMs
+  return stmt.get(
+    startDate.toISOString(), endDate.toISOString(),
+    startDate.toISOString(), endDate.toISOString(),
+    startDate.toISOString(), endDate.toISOString()
+  ) || {};
 }
 
 function getDailyStats(daysOrStartDate, endDate) {

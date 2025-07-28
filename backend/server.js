@@ -7,7 +7,7 @@ const { initializeScheduler, RATE_LIMITS } = require("./scheduler");
 const { ApifyClient } = require("apify-client");
 const accountsStore = require("./accountsStore");
 const targetsStore = require("./targetsStore");
-
+const { scrapeProduct } = require('./puppeteerScraper');
 // Import all database services
 const {
   createCampaign,
@@ -343,30 +343,15 @@ app.post("/api/scrape/accounts", async (req, res) => {
   console.log("Starting scrape for account URL:", postUrl);
 
   try {
+    if (!postUrl || typeof postUrl !== "string") {
+      throw new Error("Missing or invalid profile URL");
+    }
     const usernameMatch = postUrl.match(/instagram\.com\/([^\/\?]+)/);
-    if (!usernameMatch) throw new Error("Invalid profile URL");
+    if (!usernameMatch || !usernameMatch[1]) throw new Error("Invalid profile URL");
 
     const username = usernameMatch[1];
 
-    // Get saved cookies for authentication
-    const account = accountsStore.loadAccounts()[0]; // Use first available account
-    if (!account || !account.cookies) {
-      throw new Error(
-        "No authenticated Instagram account found. Please add an account first."
-      );
-    }
-
-    const browser = await puppeteer.launch({ headless: false });
-    const page = await browser.newPage();
-
-    // Set the saved cookies
-    await page.setCookie(...account.cookies);
-    await page.goto(`https://www.instagram.com/${username}/`, {
-      waitUntil: "networkidle2",
-    });
-
-    // Wait for the followers count to be visible
-    await page.waitForSelector('a[href$="/followers/"]', { timeout: 5000 });
+    // ...existing code...
 
     // Click the followers link and wait for modal
     await page.click('a[href$="/followers/"]');
@@ -453,69 +438,30 @@ app.post("/api/scrape/posts", async (req, res) => {
     const { postUrl } = req.body;
     console.log("Starting scrape for URL:", postUrl);
 
-    if (!process.env.APIFY_TOKEN) {
-      throw new Error("APIFY_TOKEN is not set in environment variables");
-    } // Run the Instagram scraper actor
-    console.log("Starting Apify actor with Instagram comment scraper...");
+    // Use your own Puppeteer scraper
+    const usernames = await scrapeProduct(postUrl);
+    console.log("Scraped usernames:", usernames);
 
-    // Prepare Actor input
-    const input = {
-      directUrls: [postUrl],
-      resultsLimit: 20,
-    };
-    console.log("Actor input:", input);
-
-    // Run the Actor and wait for it to finish
-    const run = await apifyClient
-      .actor("apify/instagram-comment-scraper")
-      .call(input);
-    console.log("Run completed, dataset ID:", run.defaultDatasetId);
-    console.log(
-      `💾 Results available at: https://console.apify.com/storage/datasets/${run.defaultDatasetId}`
-    );
-
-    // Get the dataset
-    const { items } = await apifyClient
-      .dataset(run.defaultDatasetId)
-      .listItems();
-    console.log("Got items:", JSON.stringify(items, null, 2)); // Process the results    console.log("Processing items:", items);
-    let leads = [];
-    if (items && items.length > 0) {
-      leads = items
-        .map((item) => ({
-          username: item.ownerUsername, // Changed to ownerUsername as per Apify's format
-          profileUrl: `https://instagram.com/${item.ownerUsername}`,
-          comment: item.text || "",
-          timestamp: item.timestamp || new Date().toISOString(),
-        }))
-        .filter(
-          (lead, index, self) =>
-            // Remove duplicates
-            index === self.findIndex((l) => l.username === lead.username)
-        )
-        .slice(0, 15); // Limit to 15 results
-    }
-
-    // Store leads in database
-    leads.forEach((lead) => {
+    // Optionally store leads in database
+    usernames.forEach((username) => {
       try {
         LeadsService.addLead({
-          username: lead.username,
-          profileUrl: lead.profileUrl,
+          username,
+          profileUrl: `https://instagram.com/${username}`,
           source: "instagram_post_comments",
           sourceUrl: postUrl,
-          scrapedAt: lead.timestamp,
-          notes: lead.comment,
+          scrapedAt: new Date().toISOString(),
+          notes: "",
         });
       } catch (error) {
-        console.error(`Error storing lead ${lead.username}:`, error);
+        console.error(`Error storing lead ${username}:`, error);
       }
     });
 
-    console.log("Processed leads:", leads);
+    // Return usernames directly for frontend display
     res.json({
       status: "success",
-      leads,
+      usernames,
     });
   } catch (error) {
     console.error("Error scraping leads:", error);
@@ -1243,55 +1189,41 @@ app.post("/api/crm/contacts/:id/interactions", async (req, res) => {
 // Analytics Endpoints - Updated to use AnalyticsService
 app.get("/api/analytics", async (req, res) => {
   try {
-    const timeRange = req.query.range || "7d";
-    const days = parseInt(timeRange.replace(/[hd]/, "")) || 7;
+    // Support ?range=7d or ?start=YYYY-MM-DD&end=YYYY-MM-DD
+    let startDate, endDate;
+    if (req.query.start && req.query.end) {
+      startDate = new Date(req.query.start);
+      endDate = new Date(req.query.end);
+    } else {
+      const days = parseInt((req.query.range || "7d").replace(/[^0-9]/g, "")) || 7;
+      endDate = new Date();
+      startDate = new Date();
+      startDate.setDate(endDate.getDate() - days);
+    }
 
-    // Use analytics service for real data
-    const messageSuccessRate = analytics.getMessageAnalytics();
+    // Get comprehensive analytics
+    const analyticsData = await analytics.getAnalytics(startDate, endDate);
     const peakTimes = analytics.getPeakResponseTimes();
-    const dashboardStats = analytics.getDashboardStats();
-    const dailyStats = analytics.getDailyStats(days);
-    const accountActivity = analytics.getAccountActivity();
-    const campaignStats = analytics.getCampaignStats();
 
-    // Calculate totals from real data
-    const totalMessages = dailyStats.reduce(
-      (sum, day) => sum + (day.messages || 0),
-      0
-    );
-    const totalReplies = dailyStats.reduce(
-      (sum, day) => sum + (day.replies || 0),
-      0
-    );
-    const totalViews = dailyStats.reduce(
-      (sum, day) => sum + (day.views || 0),
-      0
-    );
-    const activeAccounts = AccountsService.getAccounts().filter(
-      (a) => a.isActive
-    ).length;
-
-    const replyRate =
-      totalMessages > 0
-        ? Math.round((totalReplies / totalMessages) * 100 * 10) / 10
-        : 0;
-    const viewRate =
-      totalMessages > 0
-        ? Math.round((totalViews / totalMessages) * 100 * 10) / 10
-        : 0;
+    // Get recent activity (last 10 actions)
+    let recentActivity = [];
+    try {
+      const db = require("./database/db");
+      const stmt = db.prepare(`
+        SELECT username, action_type, details, status, created_at
+        FROM activity_logs
+        ORDER BY created_at DESC
+        LIMIT 10
+      `);
+      recentActivity = stmt.all();
+    } catch (err) {
+      console.error("Error fetching recent activity:", err);
+    }
 
     res.json({
-      totalMessages,
-      totalReplies,
-      totalViews,
-      activeAccounts,
-      replyRate,
-      viewRate,
-      dailyStats,
-      accountStats: accountActivity,
-      campaignStats,
-      messageSuccessRate,
+      ...analyticsData,
       peakTimes,
+      recentActivity,
     });
   } catch (error) {
     console.error("Error fetching analytics:", error);

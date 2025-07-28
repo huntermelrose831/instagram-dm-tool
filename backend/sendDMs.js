@@ -27,10 +27,10 @@ async function waitForAnySelector(page, selectors, timeout = 10000) {
 }
 
 const DELAYS = {
-  TYPING: { min: 50, max: 150 },
-  BETWEEN_MESSAGES: { min: 30000, max: 90000 },
-  RATE_LIMIT_PAUSE: 300000,
-  ACTION_DELAY: 2000,
+  TYPING: { min: 20, max: 500 }, // Typing delay per char, still human-like but fast
+  BETWEEN_MESSAGES: { min: 5000, max: 30000 }, // 5s to 30s between messages
+  RATE_LIMIT_PAUSE: 30000, // 30s pause on rate limit
+  ACTION_DELAY: 5000, // 5s max for any action delay
 };
 
 const getRandomDelay = (min, max) =>
@@ -149,12 +149,22 @@ async function sendDMs({
     // Set user agent to avoid detection
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-    // Navigate to Instagram home page first
+    // Navigate to Instagram home page first, with retry logic
     console.log("Loading Instagram...");
-    await page.goto("https://www.instagram.com/", {
-      waitUntil: "domcontentloaded",
-      timeout: 20000,
-    });
+    let homeLoaded = false;
+    for (let attempt = 1; attempt <= 2 && !homeLoaded; attempt++) {
+      try {
+        await page.goto("https://www.instagram.com/", {
+          waitUntil: "domcontentloaded",
+          timeout: 35000,
+        });
+        homeLoaded = true;
+      } catch (err) {
+        console.warn(`Attempt ${attempt} to load Instagram home failed: ${err.message}`);
+        if (attempt === 2) throw err;
+        await delay(2000);
+      }
+    }
 
     // Set cookies in the correct domain context
     console.log("Setting authentication cookies...");
@@ -194,12 +204,22 @@ async function sendDMs({
 
     console.log(`Applied ${cookiesSet} authentication cookies`);
 
-    // Navigate to Instagram again to use the cookies
+    // Navigate to Instagram again to use the cookies, with retry logic
     console.log("Reloading Instagram with authentication...");
-    await page.goto("https://www.instagram.com/", {
-      waitUntil: "networkidle0",
-      timeout: 25000,
-    });
+    let authLoaded = false;
+    for (let attempt = 1; attempt <= 2 && !authLoaded; attempt++) {
+      try {
+        await page.goto("https://www.instagram.com/", {
+          waitUntil: "networkidle0",
+          timeout: 35000,
+        });
+        authLoaded = true;
+      } catch (err) {
+        console.warn(`Attempt ${attempt} to reload Instagram with authentication failed: ${err.message}`);
+        if (attempt === 2) throw err;
+        await delay(2000);
+      }
+    }
 
     // Wait for page to fully load
     await delay(4000);
@@ -356,7 +376,7 @@ async function sendDMs({
 
           // Check for response (temporarily disabled due to navigation timeouts)
           // TODO: Re-enable once Instagram selectors are updated
-          /*
+          
           const hasResponse = await checkForResponse(page, target);
           if (hasResponse) {
             responseCount++;
@@ -366,8 +386,8 @@ async function sendDMs({
             // Record response in CRM
             recordInteraction(contact.id, "dm_received", "Received response");
           }
-          */
-          console.log("Response checking temporarily disabled");
+          
+          console.log(`DM to ${target} completed successfully.`);
 
           success = true;
         } catch (error) {

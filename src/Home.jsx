@@ -69,7 +69,7 @@ const Home = () => {
         <div className="px-8 py-16">
           <div className="max-w-4xl mx-auto text-center">
             <h1 className="text-5xl font-bold mb-6 bg-gradient-to-r from-green-600 to-blue-600 bg-clip-text text-transparent">
-              InstaDM Automation
+              TurboDM
             </h1>
             <p className="text-xl text-gray-700 mb-8 max-w-2xl mx-auto">
               Scale your Instagram outreach with intelligent automation,
