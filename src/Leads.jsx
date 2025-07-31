@@ -19,6 +19,14 @@ const Leads = () => {
   // Main tab state
   const [activeTab, setActiveTab] = useState("discovery");
 
+  // Advanced lead filters
+  const [filterProfilePic, setFilterProfilePic] = useState(false);
+  const [filterBio, setFilterBio] = useState(false);
+  const [filterWebsite, setFilterWebsite] = useState(false);
+  const [filterAccountType, setFilterAccountType] = useState("both"); // "private", "business", "both"
+  const [filterFollowers, setFilterFollowers] = useState({ min: "", max: "" });
+  const [filterPosts, setFilterPosts] = useState({ min: "", max: "" });
+
   // Original Leads functionality
   const [searchType, setSearchType] = useState("posts");
   const [searchInput, setSearchInput] = useState("");
@@ -579,6 +587,45 @@ const Leads = () => {
                     </div>
                   )}
 
+                  {/* Advanced Filters UI */}
+                  <div className="mb-6 bg-gray-50 border border-gray-200 rounded-lg p-4">
+                    <h3 className="font-semibold text-black mb-2 flex items-center"><FaFilter className="mr-2" />Advanced Filters</h3>
+                    <div className="flex flex-wrap gap-4">
+                      <label className="flex items-center gap-2">
+                        <input type="checkbox" checked={filterProfilePic} onChange={e => setFilterProfilePic(e.target.checked)} />
+                        Has Profile Pic
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input type="checkbox" checked={filterBio} onChange={e => setFilterBio(e.target.checked)} />
+                        Has Bio
+                      </label>
+                      <label className="flex items-center gap-2">
+                        <input type="checkbox" checked={filterWebsite} onChange={e => setFilterWebsite(e.target.checked)} />
+                        Has Website
+                      </label>
+                      <label className="flex items-center gap-2">
+                        Account Type:
+                        <select value={filterAccountType} onChange={e => setFilterAccountType(e.target.value)} className="border rounded px-2 py-1">
+                          <option value="both">Both</option>
+                          <option value="private">Private</option>
+                          <option value="business">Business</option>
+                        </select>
+                      </label>
+                      <label className="flex items-center gap-2">
+                        Followers:
+                        <input type="number" placeholder="Min" className="w-16 border rounded px-1" value={filterFollowers.min} onChange={e => setFilterFollowers(f => ({...f, min: e.target.value}))} />
+                        -
+                        <input type="number" placeholder="Max" className="w-16 border rounded px-1" value={filterFollowers.max} onChange={e => setFilterFollowers(f => ({...f, max: e.target.value}))} />
+                      </label>
+                      <label className="flex items-center gap-2">
+                        Posts:
+                        <input type="number" placeholder="Min" className="w-16 border rounded px-1" value={filterPosts.min} onChange={e => setFilterPosts(f => ({...f, min: e.target.value}))} />
+                        -
+                        <input type="number" placeholder="Max" className="w-16 border rounded px-1" value={filterPosts.max} onChange={e => setFilterPosts(f => ({...f, max: e.target.value}))} />
+                      </label>
+                    </div>
+                  </div>
+
                   {/* Results Grid */}
                   {loading ? (
                     <div className="text-center py-12 text-gray-500">
@@ -596,41 +643,74 @@ const Leads = () => {
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-96 overflow-y-auto">
-                      {leads.map((lead, index) => {
-                        // Handle both string and object formats
-                        const username =
-                          typeof lead === "string" ? lead : lead.username;
-                        const leadKey = username || `lead-${index}`;
+                      {leads
+                        .filter((lead) => {
+                          // Exclude already-contacted leads
+                          const username = typeof lead === "string" ? lead : lead.username;
+                          if (addedLeads.has(username)) return false;
 
-                        return (
-                          <div
-                            key={leadKey}
-                            className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg p-3 hover:bg-gray-100 transition-colors"
-                          >
-                            <div className="flex-1">
-                              <span className="text-black font-medium">
-                                @{username}
-                              </span>
-                              {typeof lead === "object" && lead.comment && (
-                                <p className="text-xs text-gray-600 mt-1 truncate">
-                                  {lead.comment}
-                                </p>
-                              )}
-                            </div>
-                            <button
-                              onClick={() => addToTargets(username)}
-                              disabled={addedLeads.has(username)}
-                              className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
-                                addedLeads.has(username)
-                                  ? "bg-green-100 text-green-600 cursor-not-allowed"
-                                  : "bg-purple-100 text-purple-600 hover:bg-purple-200"
-                              }`}
+                          // Profile Pic filter
+                          if (filterProfilePic && typeof lead === "object" && lead.profile_pic_url === "") return false;
+                          if (filterProfilePic && typeof lead === "object" && lead.profile_pic_url === undefined) return false;
+                          if (filterProfilePic && typeof lead === "string") return false;
+
+                          // Bio filter
+                          if (filterBio && typeof lead === "object" && (!lead.biography || lead.biography.trim() === "")) return false;
+                          if (filterBio && typeof lead === "string") return false;
+
+                          // Website filter
+                          if (filterWebsite && typeof lead === "object" && (!lead.external_url || lead.external_url.trim() === "")) return false;
+                          if (filterWebsite && typeof lead === "string") return false;
+
+                          // Account type filter
+                          if (filterAccountType !== "both" && typeof lead === "object") {
+                            if (filterAccountType === "private" && !lead.is_private) return false;
+                            if (filterAccountType === "business" && !lead.is_business_account) return false;
+                          }
+                          if (filterAccountType !== "both" && typeof lead === "string") return false;
+
+                          // Followers filter
+                          if (typeof lead === "object" && filterFollowers.min && lead.edge_followed_by && lead.edge_followed_by.count < parseInt(filterFollowers.min)) return false;
+                          if (typeof lead === "object" && filterFollowers.max && lead.edge_followed_by && lead.edge_followed_by.count > parseInt(filterFollowers.max)) return false;
+
+                          // Posts filter
+                          if (typeof lead === "object" && filterPosts.min && lead.edge_owner_to_timeline_media && lead.edge_owner_to_timeline_media.count < parseInt(filterPosts.min)) return false;
+                          if (typeof lead === "object" && filterPosts.max && lead.edge_owner_to_timeline_media && lead.edge_owner_to_timeline_media.count > parseInt(filterPosts.max)) return false;
+
+                          return true;
+                        })
+                        .map((lead, index) => {
+                          const username = typeof lead === "string" ? lead : lead.username;
+                          const leadKey = username || `lead-${index}`;
+                          return (
+                            <div
+                              key={leadKey}
+                              className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg p-3 hover:bg-gray-100 transition-colors"
                             >
-                              {addedLeads.has(username) ? "Added" : "Add"}
-                            </button>
-                          </div>
-                        );
-                      })}
+                              <div className="flex-1">
+                                <span className="text-black font-medium">
+                                  @{username}
+                                </span>
+                                {typeof lead === "object" && lead.comment && (
+                                  <p className="text-xs text-gray-600 mt-1 truncate">
+                                    {lead.comment}
+                                  </p>
+                                )}
+                              </div>
+                              <button
+                                onClick={() => addToTargets(username)}
+                                disabled={addedLeads.has(username)}
+                                className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
+                                  addedLeads.has(username)
+                                    ? "bg-green-100 text-green-600 cursor-not-allowed"
+                                    : "bg-purple-100 text-purple-600 hover:bg-purple-200"
+                                }`}
+                              >
+                                {addedLeads.has(username) ? "Added" : "Add"}
+                              </button>
+                            </div>
+                          );
+                        })}
                     </div>
                   )}
                 </div>

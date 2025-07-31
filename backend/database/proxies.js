@@ -195,6 +195,11 @@ class ProxyService {
 
     return null;
   }
+
+  // Alias for backward compatibility
+  static getAllProxies() {
+    return this.getProxies();
+  }
 }
 
 module.exports = ProxyService;

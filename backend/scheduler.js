@@ -10,12 +10,12 @@ const accountsStore = require("./accountsStore");
 // Instagram's general rate limits (customize these based on your needs)
 const RATE_LIMITS = {
   MAX_DMS_PER_DAY: 100,
-  MIN_DELAY_BETWEEN_DMS: 60000, // 1 minute in milliseconds
+  MIN_DELAY_BETWEEN_DMS: 5000, // 5 seconds in milliseconds
 };
 
-// Random delay between messages to avoid detection
+// Random delay between messages to avoid detection (5s to 30s)
 const getRandomDelay = () => {
-  return Math.floor(Math.random() * (300000 - 60000) + 60000); // Random delay between 1-5 minutes
+  return Math.floor(Math.random() * (30000 - 5000 + 1) + 5000); // 5s to 30s
 };
 
 // Process a single message with rate limiting
@@ -213,7 +213,11 @@ const processJobWithTimeout = async (job, timeoutMs = 600000) => {
       console.error(
         `Job #${job.id} timed out after ${timeoutMs / 1000} seconds`
       );
-      updateJobStatus(job.id, "failed").catch(console.error);
+      try {
+        updateJobStatus(job.id, "failed");
+      } catch (err) {
+        console.error("Error updating job status after timeout:", err);
+      }
       reject(
         new Error(`Job processing timed out after ${timeoutMs / 1000} seconds`)
       );

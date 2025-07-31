@@ -71,7 +71,10 @@ function getContacts(filters = {}) {
               }
               return null;
             } catch (e) {
-              console.error("Error parsing note:", note);
+              // Only log if the note is not a trivial null/empty value
+              if (note && note !== "null" && note.trim() !== "") {
+                console.error(`Error parsing note: ${note} | ${e.message}`);
+              }
               return null;
             }
           })

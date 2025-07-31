@@ -2,13 +2,12 @@ const express = require("express");
 const cors = require("cors");
 const { sendDMs } = require("./sendDMs");
 const analytics = require("./database/analytics");
-const ratelimits = require("./database/ratelimits");
 const puppeteer = require("puppeteer");
 const { initializeScheduler, RATE_LIMITS } = require("./scheduler");
 const { ApifyClient } = require("apify-client");
 const accountsStore = require("./accountsStore");
 const targetsStore = require("./targetsStore");
-
+const { scrapeProduct } = require('./puppeteerScraper');
 // Import all database services
 const {
   createCampaign,
@@ -36,6 +35,9 @@ const {
   AnalyticsService,
   RateLimitService,
 } = require("./database");
+
+// Import ratelimits for counter resets
+const ratelimits = require("./database/ratelimits.js");
 
 // Import message monitoring system
 const { messageMonitor } = require("./messageMonitor");
@@ -145,7 +147,10 @@ app.post("/api/add-account", async (req, res) => {
   try {
     // Launch Puppeteer, login, and save cookies
     const puppeteer = require("puppeteer");
-    const browser = await puppeteer.launch({ headless: true });
+    const browser = await puppeteer.launch({ 
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"]
+    });
     const page = await browser.newPage();
     await page.goto("https://www.instagram.com/accounts/login/", {
       waitUntil: "networkidle2",
@@ -213,6 +218,54 @@ app.post("/api/accounts", async (req, res) => {
   }
 });
 
+// Login to Instagram and save cookies
+app.post("/api/accounts/login", async (req, res) => {
+  try {
+    const { username, password } = req.body;
+
+    if (!username || !password) {
+      return res.status(400).json({
+        status: "error",
+        message: "Username and password are required"
+      });
+    }
+
+    // Check if account exists in database
+    const account = AccountsService.getAccountByUsername(username);
+    if (!account) {
+      return res.status(404).json({
+        status: "error",
+        message: "Account not found. Please add the account first."
+      });
+    }
+
+    console.log(`Starting Instagram login process for ${username}...`);
+    
+    // Import and run the login function
+    const { loginAndSaveCookies } = require('./login');
+    const result = await loginAndSaveCookies(username, password);
+
+    if (result.success) {
+      res.json({
+        status: "success",
+        message: "Successfully logged in and saved cookies to Instagram"
+      });
+    } else {
+      res.status(500).json({
+        status: "error",
+        message: "Login failed - please check your credentials"
+      });
+    }
+
+  } catch (error) {
+    console.error("Error during Instagram login:", error);
+    res.status(500).json({
+      status: "error",
+      message: error.message || "Login process failed"
+    });
+  }
+});
+
 app.put("/api/accounts/:username", async (req, res) => {
   try {
     const { username } = req.params;
@@ -256,35 +309,49 @@ app.delete("/api/accounts/:username", async (req, res) => {
   }
 });
 
+// Additional endpoint to delete by account ID (for frontend compatibility)
+app.delete("/api/accounts/id/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const accountId = parseInt(id);
+    
+    // Get all accounts to find the one with matching ID
+    const accounts = AccountsService.getAccounts();
+    const accountToDelete = accounts.find(account => account.id === accountId);
+    
+    if (!accountToDelete) {
+      return res.status(404).json({ status: "error", message: "Account not found" });
+    }
+    
+    const success = AccountsService.deleteAccount(accountToDelete.username);
+
+    if (success) {
+      // Also remove from old accountsStore for backward compatibility
+      accountsStore.removeAccount(accountToDelete.username);
+      res.json({ status: "success", message: "Account deleted successfully" });
+    } else {
+      res.status(404).json({ status: "error", message: "Account not found" });
+    }
+  } catch (error) {
+    console.error("Error deleting account:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
 app.post("/api/scrape/accounts", async (req, res) => {
   const { postUrl } = req.body;
   console.log("Starting scrape for account URL:", postUrl);
 
   try {
+    if (!postUrl || typeof postUrl !== "string") {
+      throw new Error("Missing or invalid profile URL");
+    }
     const usernameMatch = postUrl.match(/instagram\.com\/([^\/\?]+)/);
-    if (!usernameMatch) throw new Error("Invalid profile URL");
+    if (!usernameMatch || !usernameMatch[1]) throw new Error("Invalid profile URL");
 
     const username = usernameMatch[1];
 
-    // Get saved cookies for authentication
-    const account = accountsStore.loadAccounts()[0]; // Use first available account
-    if (!account || !account.cookies) {
-      throw new Error(
-        "No authenticated Instagram account found. Please add an account first."
-      );
-    }
-
-    const browser = await puppeteer.launch({ headless: false });
-    const page = await browser.newPage();
-
-    // Set the saved cookies
-    await page.setCookie(...account.cookies);
-    await page.goto(`https://www.instagram.com/${username}/`, {
-      waitUntil: "networkidle2",
-    });
-
-    // Wait for the followers count to be visible
-    await page.waitForSelector('a[href$="/followers/"]', { timeout: 5000 });
+    // ...existing code...
 
     // Click the followers link and wait for modal
     await page.click('a[href$="/followers/"]');
@@ -371,69 +438,30 @@ app.post("/api/scrape/posts", async (req, res) => {
     const { postUrl } = req.body;
     console.log("Starting scrape for URL:", postUrl);
 
-    if (!process.env.APIFY_TOKEN) {
-      throw new Error("APIFY_TOKEN is not set in environment variables");
-    } // Run the Instagram scraper actor
-    console.log("Starting Apify actor with Instagram comment scraper...");
+    // Use your own Puppeteer scraper
+    const usernames = await scrapeProduct(postUrl);
+    console.log("Scraped usernames:", usernames);
 
-    // Prepare Actor input
-    const input = {
-      directUrls: [postUrl],
-      resultsLimit: 20,
-    };
-    console.log("Actor input:", input);
-
-    // Run the Actor and wait for it to finish
-    const run = await apifyClient
-      .actor("apify/instagram-comment-scraper")
-      .call(input);
-    console.log("Run completed, dataset ID:", run.defaultDatasetId);
-    console.log(
-      `💾 Results available at: https://console.apify.com/storage/datasets/${run.defaultDatasetId}`
-    );
-
-    // Get the dataset
-    const { items } = await apifyClient
-      .dataset(run.defaultDatasetId)
-      .listItems();
-    console.log("Got items:", JSON.stringify(items, null, 2)); // Process the results    console.log("Processing items:", items);
-    let leads = [];
-    if (items && items.length > 0) {
-      leads = items
-        .map((item) => ({
-          username: item.ownerUsername, // Changed to ownerUsername as per Apify's format
-          profileUrl: `https://instagram.com/${item.ownerUsername}`,
-          comment: item.text || "",
-          timestamp: item.timestamp || new Date().toISOString(),
-        }))
-        .filter(
-          (lead, index, self) =>
-            // Remove duplicates
-            index === self.findIndex((l) => l.username === lead.username)
-        )
-        .slice(0, 15); // Limit to 15 results
-    }
-
-    // Store leads in database
-    leads.forEach((lead) => {
+    // Optionally store leads in database
+    usernames.forEach((username) => {
       try {
         LeadsService.addLead({
-          username: lead.username,
-          profileUrl: lead.profileUrl,
+          username,
+          profileUrl: `https://instagram.com/${username}`,
           source: "instagram_post_comments",
           sourceUrl: postUrl,
-          scrapedAt: lead.timestamp,
-          notes: lead.comment,
+          scrapedAt: new Date().toISOString(),
+          notes: "",
         });
       } catch (error) {
-        console.error(`Error storing lead ${lead.username}:`, error);
+        console.error(`Error storing lead ${username}:`, error);
       }
     });
 
-    console.log("Processed leads:", leads);
+    // Return usernames directly for frontend display
     res.json({
       status: "success",
-      leads,
+      usernames,
     });
   } catch (error) {
     console.error("Error scraping leads:", error);
@@ -1161,55 +1189,41 @@ app.post("/api/crm/contacts/:id/interactions", async (req, res) => {
 // Analytics Endpoints - Updated to use AnalyticsService
 app.get("/api/analytics", async (req, res) => {
   try {
-    const timeRange = req.query.range || "7d";
-    const days = parseInt(timeRange.replace(/[hd]/, "")) || 7;
+    // Support ?range=7d or ?start=YYYY-MM-DD&end=YYYY-MM-DD
+    let startDate, endDate;
+    if (req.query.start && req.query.end) {
+      startDate = new Date(req.query.start);
+      endDate = new Date(req.query.end);
+    } else {
+      const days = parseInt((req.query.range || "7d").replace(/[^0-9]/g, "")) || 7;
+      endDate = new Date();
+      startDate = new Date();
+      startDate.setDate(endDate.getDate() - days);
+    }
 
-    // Use AnalyticsService for real data
-    const messageSuccessRate = await AnalyticsService.getMessageAnalytics();
-    const peakTimes = await AnalyticsService.getPeakResponseTimes();
-    const dashboardStats = await AnalyticsService.getDashboardStats();
-    const dailyStats = await AnalyticsService.getDailyStats(days);
-    const accountActivity = await AnalyticsService.getAccountActivity();
-    const campaignStats = await AnalyticsService.getCampaignStats();
+    // Get comprehensive analytics
+    const analyticsData = await analytics.getAnalytics(startDate, endDate);
+    const peakTimes = analytics.getPeakResponseTimes();
 
-    // Calculate totals from real data
-    const totalMessages = dailyStats.reduce(
-      (sum, day) => sum + (day.messages || 0),
-      0
-    );
-    const totalReplies = dailyStats.reduce(
-      (sum, day) => sum + (day.replies || 0),
-      0
-    );
-    const totalViews = dailyStats.reduce(
-      (sum, day) => sum + (day.views || 0),
-      0
-    );
-    const activeAccounts = AccountsService.getAccounts().filter(
-      (a) => a.isActive
-    ).length;
-
-    const replyRate =
-      totalMessages > 0
-        ? Math.round((totalReplies / totalMessages) * 100 * 10) / 10
-        : 0;
-    const viewRate =
-      totalMessages > 0
-        ? Math.round((totalViews / totalMessages) * 100 * 10) / 10
-        : 0;
+    // Get recent activity (last 10 actions)
+    let recentActivity = [];
+    try {
+      const db = require("./database/db");
+      const stmt = db.prepare(`
+        SELECT username, action_type, details, status, created_at
+        FROM activity_logs
+        ORDER BY created_at DESC
+        LIMIT 10
+      `);
+      recentActivity = stmt.all();
+    } catch (err) {
+      console.error("Error fetching recent activity:", err);
+    }
 
     res.json({
-      totalMessages,
-      totalReplies,
-      totalViews,
-      activeAccounts,
-      replyRate,
-      viewRate,
-      dailyStats,
-      accountStats: accountActivity,
-      campaignStats,
-      messageSuccessRate,
+      ...analyticsData,
       peakTimes,
+      recentActivity,
     });
   } catch (error) {
     console.error("Error fetching analytics:", error);
@@ -1217,10 +1231,10 @@ app.get("/api/analytics", async (req, res) => {
   }
 });
 
-// Dashboard Stats Endpoint - Updated to use AnalyticsService
+// Dashboard Stats Endpoint - Updated to use analytics service
 app.get("/api/dashboard/stats", async (req, res) => {
   try {
-    const dashboardStats = await AnalyticsService.getDashboardStats();
+    const dashboardStats = analytics.getDashboardStats();
 
     // Get additional stats from the database
     const activeAccounts = AccountsService.getAccounts().filter(
@@ -1680,7 +1694,7 @@ app.get("/api/account-safety/accounts", async (req, res) => {
 
 app.get("/api/account-safety/proxies", async (req, res) => {
   try {
-    const proxies = ProxyService.getAllProxies();
+    const proxies = ProxyService.getProxies();
     res.json({
       status: "success",
       proxies: proxies,
@@ -1708,20 +1722,42 @@ app.post("/api/account-safety/proxies", async (req, res) => {
       username: username || null,
       password: password || null,
       type,
-      isActive: true,
+      isActive: 1, // Use 1 for true, 0 for false
     };
 
-    const proxy = ProxyService.addProxy(proxyData);
+    const proxyId = ProxyService.createProxy(proxyData);
 
     console.log(`Added new proxy: ${host}:${port} (${type})`);
 
     res.json({
       status: "success",
       message: "Proxy added successfully",
-      proxyId: proxy.id,
+      proxyId: proxyId,
     });
   } catch (error) {
     console.error("Error adding proxy:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+// Delete a proxy by ID
+app.delete("/api/account-safety/proxies/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const success = ProxyService.deleteProxy(parseInt(id));
+    if (success) {
+      res.json({
+        status: "success",
+        message: "Proxy deleted successfully",
+      });
+    } else {
+      res.status(404).json({
+        status: "error",
+        message: "Proxy not found",
+      });
+    }
+  } catch (error) {
+    console.error("Error deleting proxy:", error);
     res.status(500).json({ status: "error", message: error.message });
   }
 });
@@ -1735,6 +1771,93 @@ app.get("/api/account-safety/rate-limits", async (req, res) => {
     });
   } catch (error) {
     console.error("Error fetching rate limits:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+// Create new rate limit
+app.post("/api/account-safety/rate-limits", async (req, res) => {
+  try {
+    const { accountId, dmPerHour, dmPerDay, followPerHour, followPerDay, isActive } = req.body;
+    
+    // Get account by ID
+    const accounts = AccountsService.getAccounts();
+    const account = accounts.find(acc => acc.id == accountId);
+    
+    if (!account) {
+      return res.status(404).json({ 
+        status: "error", 
+        message: "Account not found" 
+      });
+    }
+
+    const rateLimitData = {
+      username: account.username,
+      dmPerHour,
+      dmPerDay,
+      followPerHour,
+      followPerDay,
+      isActive,
+    };
+
+    const rateLimitId = RateLimitService.createRateLimit(rateLimitData);
+    
+    res.json({
+      status: "success",
+      message: "Rate limit created successfully",
+      rateLimitId: rateLimitId,
+    });
+  } catch (error) {
+    console.error("Error creating rate limit:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+// Update rate limit
+app.put("/api/account-safety/rate-limits/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+
+    const success = RateLimitService.updateRateLimit(id, updates);
+    
+    if (success) {
+      res.json({
+        status: "success",
+        message: "Rate limit updated successfully",
+      });
+    } else {
+      res.status(404).json({
+        status: "error",
+        message: "Rate limit not found",
+      });
+    }
+  } catch (error) {
+    console.error("Error updating rate limit:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+// Delete rate limit
+app.delete("/api/account-safety/rate-limits/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const success = RateLimitService.deleteRateLimit(id);
+    
+    if (success) {
+      res.json({
+        status: "success",
+        message: "Rate limit deleted successfully",
+      });
+    } else {
+      res.status(404).json({
+        status: "error",
+        message: "Rate limit not found",
+      });
+    }
+  } catch (error) {
+    console.error("Error deleting rate limit:", error);
     res.status(500).json({ status: "error", message: error.message });
   }
 });
@@ -2554,13 +2677,13 @@ app.post("/api/team/templates/:id/share", async (req, res) => {
   }
 });
 
-// Instagram Service Management
-const InstagramService = require("./services/instagramService_fixed.js");
+// Instagram Service Management - TEMPORARILY DISABLED DUE TO MISSING DEPENDENCIES
+// const InstagramService = require("./services/instagramService_fixed.js");
 
 // Global Instagram service instance
 let instagramService = null;
 
-// Get Saved Instagram Accounts
+// Get Saved Instagram Accounts - USING BASIC ACCOUNTS STORE
 app.get("/api/instagram/accounts", async (req, res) => {
   try {
     const accounts = accountsStore.loadAccounts();
@@ -2607,8 +2730,23 @@ app.post("/api/instagram/login", async (req, res) => {
       // await instagramService.close(); // Close previous session if any
     }
     // The refactored InstagramService constructor might take username for session path
-    instagramService = new InstagramService(username);
+    // instagramService = new InstagramService(username); // TEMPORARILY DISABLED
 
+    // TEMPORARY SIMPLE LOGIN RESPONSE
+    if (password) {
+      return res.json({
+        status: "success",
+        message: "Login functionality temporarily simplified. Use /api/add-account for full Instagram login.",
+        user: username,
+      });
+    } else {
+      return res.status(401).json({
+        status: "error",
+        message: "Password required for login",
+      });
+    }
+
+    /* ORIGINAL CODE TEMPORARILY DISABLED
     // The 'initialize' method is no longer separate.
     // Login process itself will handle browser initialization via PuppeteerHelper.
     // await instagramService.initialize(); // REMOVED
@@ -2644,6 +2782,7 @@ app.post("/api/instagram/login", async (req, res) => {
         message: "Login failed. Please check your credentials or try again.",
       });
     }
+    */
   } catch (error) {
     console.error("Instagram login error in route:", error); // Added "in route" for clarity
     res.status(500).json({
@@ -2655,9 +2794,18 @@ app.post("/api/instagram/login", async (req, res) => {
   }
 });
 
-// Get Login Status
+// Get Login Status - TEMPORARILY SIMPLIFIED
 app.get("/api/instagram/status", async (req, res) => {
   try {
+    // TEMPORARY: Return basic status since InstagramService is disabled
+    res.json({
+      status: "success",
+      isLoggedIn: false,
+      currentUser: null,
+      message: "Instagram service temporarily simplified. Use /api/accounts to check saved accounts."
+    });
+
+    /* ORIGINAL CODE TEMPORARILY DISABLED
     const isLoggedIn =
       instagramService && instagramService.instagramApi.getIsLoggedIn();
     const currentUser = isLoggedIn
@@ -2669,6 +2817,7 @@ app.get("/api/instagram/status", async (req, res) => {
       isLoggedIn,
       currentUser,
     });
+    */
   } catch (error) {
     console.error("Error getting status:", error);
     res.status(500).json({

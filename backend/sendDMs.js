@@ -2,7 +2,7 @@
 
 const puppeteer = require("puppeteer-extra");
 const StealthPlugin = require("puppeteer-extra-plugin-stealth");
-const accountsStore = require("./accountsStore");
+const AccountsService = require("./database/accounts");
 const { delay } = require("./utils/delay");
 const { SELECTORS } = require("./utils/selectors");
 const { createContact, recordInteraction } = require("./database/crm");
@@ -27,10 +27,10 @@ async function waitForAnySelector(page, selectors, timeout = 10000) {
 }
 
 const DELAYS = {
-  TYPING: { min: 50, max: 150 },
-  BETWEEN_MESSAGES: { min: 30000, max: 90000 },
-  RATE_LIMIT_PAUSE: 300000,
-  ACTION_DELAY: 2000,
+  TYPING: { min: 20, max: 500 }, // Typing delay per char, still human-like but fast
+  BETWEEN_MESSAGES: { min: 5000, max: 30000 }, // 5s to 30s between messages
+  RATE_LIMIT_PAUSE: 30000, // 30s pause on rate limit
+  ACTION_DELAY: 5000, // 5s max for any action delay
 };
 
 const getRandomDelay = (min, max) =>
@@ -65,7 +65,7 @@ async function sendDMs({
     );
     message = messageVariations[selectedVariationIndex];
   }
-  const account = accountsStore.getAccountByUsername(igUsername);
+  const account = AccountsService.getAccountByUsername(igUsername);
   if (!account?.cookies)
     throw new Error("No cookies found for this account. Please log in first.");
   let browser;
@@ -75,7 +75,7 @@ async function sendDMs({
       "Attempting to launch Puppeteer with working config (--no-sandbox)..."
     );
     browser = await puppeteer.launch({
-      headless: true,
+      headless: false,
       args: ["--no-sandbox", "--disable-setuid-sandbox"],
       timeout: 30000,
       protocolTimeout: 120000, // Increase protocol timeout for cookie operations
@@ -90,7 +90,7 @@ async function sendDMs({
       // Fallback configuration with additional sandbox args
       console.log("Attempting fallback Puppeteer config...");
       browser = await puppeteer.launch({
-        headless: true,
+        headless: false,
         defaultViewport: null,
         args: ["--no-sandbox", "--disable-setuid-sandbox"],
         timeout: 20000,
@@ -106,7 +106,7 @@ async function sendDMs({
         // Extended configuration with more args
         console.log("Attempting extended Puppeteer config...");
         browser = await puppeteer.launch({
-          headless: true,
+          headless: false,
           defaultViewport: null,
           args: [
             "--no-sandbox",
@@ -144,26 +144,126 @@ async function sendDMs({
   }
   const page = await browser.newPage();
   try {
-    await page.setDefaultNavigationTimeout(20000); // Reduced to 20 seconds
+    await page.setDefaultNavigationTimeout(30000);
 
-    // Set cookies with error handling
-    console.log("Setting cookies for Instagram authentication...");
-    try {
-      await page.setCookie(...account.cookies);
-      console.log("✓ Cookies set successfully");
-    } catch (cookieError) {
-      console.warn("Cookie setting failed:", cookieError.message);
-      // Try setting cookies one by one if batch setting fails
-      for (const cookie of account.cookies) {
-        try {
-          await page.setCookie(cookie);
-        } catch (singleCookieError) {
-          console.warn(
-            `Failed to set cookie ${cookie.name}:`,
-            singleCookieError.message
-          );
-        }
+    // Set user agent to avoid detection
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+
+    // Navigate to Instagram home page first, with retry logic
+    console.log("Loading Instagram...");
+    let homeLoaded = false;
+    for (let attempt = 1; attempt <= 2 && !homeLoaded; attempt++) {
+      try {
+        await page.goto("https://www.instagram.com/", {
+          waitUntil: "domcontentloaded",
+          timeout: 35000,
+        });
+        homeLoaded = true;
+      } catch (err) {
+        console.warn(`Attempt ${attempt} to load Instagram home failed: ${err.message}`);
+        if (attempt === 2) throw err;
+        await delay(2000);
       }
+    }
+
+    // Set cookies in the correct domain context
+    console.log("Setting authentication cookies...");
+    let cookiesSet = 0;
+    const currentCookies = await page.cookies();
+    console.log(`Found ${currentCookies.length} existing cookies`);
+
+    for (const cookie of account.cookies) {
+      try {
+        // Ensure cookie is formatted correctly for Instagram domain
+        const cleanCookie = {
+          name: cookie.name,
+          value: cookie.value,
+          domain: cookie.domain || '.instagram.com',
+          path: cookie.path || '/',
+          httpOnly: cookie.httpOnly !== undefined ? cookie.httpOnly : false,
+          secure: cookie.secure !== undefined ? cookie.secure : true,
+          sameSite: cookie.sameSite || 'None'
+        };
+
+        // Add expiration only if valid and not expired
+        if (cookie.expires && cookie.expires > Date.now() / 1000) {
+          cleanCookie.expires = cookie.expires;
+        }
+
+        await page.setCookie(cleanCookie);
+        cookiesSet++;
+        console.log(`✓ Applied cookie: ${cookie.name}`);
+      } catch (error) {
+        console.warn(`Failed to set cookie ${cookie.name}:`, error.message);
+      }
+    }
+
+    if (cookiesSet === 0) {
+      throw new Error("No cookies could be applied. Account may need to be re-added.");
+    }
+
+    console.log(`Applied ${cookiesSet} authentication cookies`);
+
+    // Navigate to Instagram again to use the cookies, with retry logic
+    console.log("Reloading Instagram with authentication...");
+    let authLoaded = false;
+    for (let attempt = 1; attempt <= 2 && !authLoaded; attempt++) {
+      try {
+        await page.goto("https://www.instagram.com/", {
+          waitUntil: "networkidle0",
+          timeout: 35000,
+        });
+        authLoaded = true;
+      } catch (err) {
+        console.warn(`Attempt ${attempt} to reload Instagram with authentication failed: ${err.message}`);
+        if (attempt === 2) throw err;
+        await delay(2000);
+      }
+    }
+
+    // Wait for page to fully load
+    await delay(4000);
+
+    // Check authentication status with more reliable selectors
+    console.log("Verifying login status...");
+    const authCheck = await page.evaluate(() => {
+      // Look for login form elements (indicates NOT logged in)
+      const loginForm = document.querySelector('form#loginForm') || 
+                       document.querySelector('input[name="username"]') ||
+                       document.querySelector('input[aria-label*="username"]');
+      
+      // Look for logged-in elements (indicates logged in)
+      const loggedInElements = {
+        newPost: document.querySelector('svg[aria-label="New post"]'),
+        messages: document.querySelector('svg[aria-label="Messenger"]') || document.querySelector('a[href*="/direct/"]'),
+        home: document.querySelector('svg[aria-label="Home"]'),
+        search: document.querySelector('svg[aria-label="Search"]'),
+        profile: document.querySelector('img[alt*="profile picture"]'),
+        settings: document.querySelector('[aria-label="Settings"]')
+      };
+
+      const loggedInCount = Object.values(loggedInElements).filter(el => el !== null).length;
+      const hasLoginForm = !!loginForm;
+      
+      return {
+        hasLoginForm,
+        loggedInCount,
+        loggedInElements: Object.fromEntries(
+          Object.entries(loggedInElements).map(([key, el]) => [key, !!el])
+        ),
+        isLoggedIn: !hasLoginForm && loggedInCount >= 2
+      };
+    });
+
+    console.log("Authentication check results:", authCheck);
+
+    if (authCheck.isLoggedIn) {
+      console.log("✅ Successfully authenticated with Instagram!");
+    } else if (authCheck.hasLoginForm) {
+      console.error("❌ Still seeing login form - cookies may be expired or invalid");
+      throw new Error("Authentication failed - login form still visible. Please re-add your Instagram account.");
+    } else {
+      console.warn("⚠️ Authentication unclear - will attempt to continue");
     }
 
     console.log("Navigating to Instagram DM page...");
@@ -276,7 +376,7 @@ async function sendDMs({
 
           // Check for response (temporarily disabled due to navigation timeouts)
           // TODO: Re-enable once Instagram selectors are updated
-          /*
+          
           const hasResponse = await checkForResponse(page, target);
           if (hasResponse) {
             responseCount++;
@@ -286,8 +386,8 @@ async function sendDMs({
             // Record response in CRM
             recordInteraction(contact.id, "dm_received", "Received response");
           }
-          */
-          console.log("Response checking temporarily disabled");
+          
+          console.log(`DM to ${target} completed successfully.`);
 
           success = true;
         } catch (error) {

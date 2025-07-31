@@ -1,3 +1,22 @@
+  // Delete a proxy by ID
+  const deleteProxy = async (proxyId) => {
+    if (!window.confirm("Are you sure you want to delete this proxy?")) {
+      return;
+    }
+    try {
+      const response = await fetch(
+        `http://localhost:5000/api/account-safety/proxies/${proxyId}`,
+        {
+          method: "DELETE",
+        }
+      );
+      if (response.ok) {
+        fetchProxies();
+      }
+    } catch (error) {
+      console.error("Error deleting proxy:", error);
+    }
+  };
 import React, { useState, useEffect, useCallback } from "react";
 import {
   FaInstagram,
@@ -40,6 +59,7 @@ const Accounts = () => {
   });
   const [editingAccount, setEditingAccount] = useState(null);
   const [showPasswords, setShowPasswords] = useState({});
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   // Safety monitoring data
   const [safetyAccounts, setSafetyAccounts] = useState([]);
@@ -47,6 +67,7 @@ const Accounts = () => {
   const [rateLimits, setRateLimits] = useState([]);
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedAccount, setSelectedAccount] = useState(null);
+  const [editingRateLimit, setEditingRateLimit] = useState(null);
 
   // Form states for safety features
   const [newProxy, setNewProxy] = useState({
@@ -185,6 +206,75 @@ const Accounts = () => {
     }
   };
 
+  const addRateLimit = async () => {
+    try {
+      const response = await fetch(
+        "http://localhost:5000/api/account-safety/rate-limits",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(newRateLimit),
+        }
+      );
+
+      if (response.ok) {
+        fetchRateLimits();
+        setShowAddModal(false);
+        setNewRateLimit({
+          accountId: "",
+          dmPerHour: 10,
+          dmPerDay: 100,
+          followPerHour: 20,
+          followPerDay: 200,
+          isActive: true,
+        });
+      }
+    } catch (error) {
+      console.error("Error adding rate limit:", error);
+    }
+  };
+
+  const updateRateLimit = async (rateLimitId, updates) => {
+    try {
+      const response = await fetch(
+        `http://localhost:5000/api/account-safety/rate-limits/${rateLimitId}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updates),
+        }
+      );
+
+      if (response.ok) {
+        fetchRateLimits();
+        setEditingRateLimit(null);
+      }
+    } catch (error) {
+      console.error("Error updating rate limit:", error);
+    }
+  };
+
+  const deleteRateLimit = async (rateLimitId) => {
+    if (!window.confirm("Are you sure you want to delete this rate limit?")) {
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `http://localhost:5000/api/account-safety/rate-limits/${rateLimitId}`,
+        {
+          method: "DELETE",
+        }
+      );
+
+      if (response.ok) {
+        fetchRateLimits();
+      }
+    } catch (error) {
+      console.error("Error deleting rate limit:", error);
+    }
+  };
+
   const toggleAccountRotation = async (accountId, enabled) => {
     try {
       await fetch(
@@ -218,7 +308,10 @@ const Accounts = () => {
 
   const handleAddAccount = async (e) => {
     e.preventDefault();
+    setIsLoggingIn(true);
+    
     try {
+      // Step 1: Add the account to database
       const response = await fetch("/api/accounts", {
         method: "POST",
         headers: {
@@ -230,6 +323,33 @@ const Accounts = () => {
       if (response.ok) {
         const createdAccount = await response.json();
         setAccounts([...accounts, createdAccount]);
+        
+        // Step 2: Automatically login to Instagram and save cookies
+        try {
+          const loginResponse = await fetch("/api/accounts/login", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              username: newAccount.username,
+              password: newAccount.password,
+            }),
+          });
+
+          const loginResult = await loginResponse.json();
+
+          if (loginResponse.ok) {
+            alert("✅ Account added successfully and logged in to Instagram! Ready to send DMs.");
+          } else {
+            alert(`✅ Account added successfully, but Instagram login failed: ${loginResult.message}\nYou can try logging in again later.`);
+          }
+        } catch (loginError) {
+          console.error("Error during Instagram login:", loginError);
+          alert("✅ Account added successfully, but Instagram login failed. You can try logging in again later.");
+        }
+        
+        // Reset form and close
         setNewAccount({
           username: "",
           password: "",
@@ -238,9 +358,14 @@ const Accounts = () => {
           notes: "",
         });
         setShowAddForm(false);
+      } else {
+        alert("Failed to add account. Please try again.");
       }
     } catch (error) {
       console.error("Error adding account:", error);
+      alert("Failed to add account. Please try again.");
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
@@ -250,15 +375,21 @@ const Accounts = () => {
     }
 
     try {
-      const response = await fetch(`/api/accounts/${accountId}`, {
+      const response = await fetch(`/api/accounts/id/${accountId}`, {
         method: "DELETE",
       });
 
       if (response.ok) {
         setAccounts(accounts.filter((account) => account.id !== accountId));
+        console.log("Account deleted successfully");
+      } else {
+        const errorData = await response.json();
+        console.error("Error deleting account:", errorData.message);
+        alert("Failed to delete account: " + errorData.message);
       }
     } catch (error) {
       console.error("Error deleting account:", error);
+      alert("Error deleting account: " + error.message);
     }
   };
 
@@ -352,6 +483,8 @@ const Accounts = () => {
                   setShowAddForm(!showAddForm);
                 } else if (activeTab === "proxies") {
                   setShowAddModal(true);
+                } else if (activeTab === "limits") {
+                  setShowAddModal(true);
                 }
               }}
               className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-medium flex items-center gap-2 transition-colors"
@@ -361,7 +494,9 @@ const Accounts = () => {
                 ? "Add Account"
                 : activeTab === "proxies"
                   ? "Add Proxy"
-                  : "Add"}
+                  : activeTab === "limits"
+                    ? "Add Rate Limit"
+                    : "Add"}
             </button>
           </div>
 
@@ -566,14 +701,26 @@ const Accounts = () => {
                   <div className="md:col-span-2 flex gap-4">
                     <button
                       type="submit"
-                      className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg font-medium transition-colors"
+                      disabled={isLoggingIn || !newAccount.username || !newAccount.password}
+                      className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white px-6 py-2 rounded-lg font-medium transition-colors flex items-center gap-2"
                     >
-                      Add Account
+                      {isLoggingIn ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                          Adding & Logging in...
+                        </>
+                      ) : (
+                        <>
+                          <FaInstagram />
+                          Add Account & Login to Instagram
+                        </>
+                      )}
                     </button>
                     <button
                       type="button"
                       onClick={() => setShowAddForm(false)}
-                      className="bg-gray-500 hover:bg-gray-600 text-white px-6 py-2 rounded-lg font-medium transition-colors"
+                      disabled={isLoggingIn}
+                      className="bg-gray-500 hover:bg-gray-600 disabled:bg-gray-400 disabled:cursor-not-allowed text-white px-6 py-2 rounded-lg font-medium transition-colors"
                     >
                       Cancel
                     </button>
@@ -1039,6 +1186,16 @@ const Accounts = () => {
                       <div>Response: {proxy.responseTime}ms</div>
                       <div>Success Rate: {proxy.successRate}%</div>
                     </div>
+
+                    <div className="flex justify-end mt-3">
+                      <button
+                        onClick={() => deleteProxy(proxy.id)}
+                        className="text-red-600 hover:text-red-900 flex items-center"
+                        title="Delete Proxy"
+                      >
+                        <FaTrash className="mr-1" /> Delete
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1105,9 +1262,22 @@ const Accounts = () => {
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                          <button className="text-blue-600 hover:text-blue-900 mr-3">
-                            <FaEdit />
-                          </button>
+                          <div className="flex space-x-2">
+                            <button 
+                              onClick={() => setEditingRateLimit(limit)}
+                              className="text-blue-600 hover:text-blue-900"
+                              title="Edit Rate Limit"
+                            >
+                              <FaEdit />
+                            </button>
+                            <button 
+                              onClick={() => deleteRateLimit(limit.id)}
+                              className="text-red-600 hover:text-red-900"
+                              title="Delete Rate Limit"
+                            >
+                              <FaTrash />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -1191,6 +1361,270 @@ const Accounts = () => {
                     className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
                   >
                     Add Proxy
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Add Rate Limit Modal */}
+        {showAddModal && activeTab === "limits" && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-semibold">Add New Rate Limit</h3>
+                <button
+                  onClick={() => setShowAddModal(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Account
+                  </label>
+                  <select
+                    value={newRateLimit.accountId}
+                    onChange={(e) =>
+                      handleNewRateLimitChange("accountId", e.target.value)
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                    required
+                  >
+                    <option value="">Select an account</option>
+                    {accounts.map((account) => (
+                      <option key={account.id} value={account.id}>
+                        {account.username}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      DMs per Hour
+                    </label>
+                    <input
+                      type="number"
+                      value={newRateLimit.dmPerHour}
+                      onChange={(e) =>
+                        handleNewRateLimitChange("dmPerHour", parseInt(e.target.value))
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                      min="1"
+                      max="50"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      DMs per Day
+                    </label>
+                    <input
+                      type="number"
+                      value={newRateLimit.dmPerDay}
+                      onChange={(e) =>
+                        handleNewRateLimitChange("dmPerDay", parseInt(e.target.value))
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                      min="1"
+                      max="500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Follows per Hour
+                    </label>
+                    <input
+                      type="number"
+                      value={newRateLimit.followPerHour}
+                      onChange={(e) =>
+                        handleNewRateLimitChange("followPerHour", parseInt(e.target.value))
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                      min="1"
+                      max="100"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Follows per Day
+                    </label>
+                    <input
+                      type="number"
+                      value={newRateLimit.followPerDay}
+                      onChange={(e) =>
+                        handleNewRateLimitChange("followPerDay", parseInt(e.target.value))
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                      min="1"
+                      max="1000"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="flex items-center">
+                    <input
+                      type="checkbox"
+                      checked={newRateLimit.isActive}
+                      onChange={(e) =>
+                        handleNewRateLimitChange("isActive", e.target.checked)
+                      }
+                      className="mr-2"
+                    />
+                    <span className="text-sm font-medium text-gray-700">Active</span>
+                  </label>
+                </div>
+
+                <div className="flex justify-end gap-3 pt-4">
+                  <button
+                    onClick={() => setShowAddModal(false)}
+                    className="px-4 py-2 text-gray-600 hover:text-gray-800"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={addRateLimit}
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                  >
+                    Add Rate Limit
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Edit Rate Limit Modal */}
+        {editingRateLimit && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-semibold">Edit Rate Limit</h3>
+                <button
+                  onClick={() => setEditingRateLimit(null)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      DMs per Hour
+                    </label>
+                    <input
+                      type="number"
+                      value={editingRateLimit.dmPerHour}
+                      onChange={(e) =>
+                        setEditingRateLimit({
+                          ...editingRateLimit,
+                          dmPerHour: parseInt(e.target.value)
+                        })
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                      min="1"
+                      max="50"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      DMs per Day
+                    </label>
+                    <input
+                      type="number"
+                      value={editingRateLimit.dmPerDay}
+                      onChange={(e) =>
+                        setEditingRateLimit({
+                          ...editingRateLimit,
+                          dmPerDay: parseInt(e.target.value)
+                        })
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                      min="1"
+                      max="500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Follows per Hour
+                    </label>
+                    <input
+                      type="number"
+                      value={editingRateLimit.followPerHour}
+                      onChange={(e) =>
+                        setEditingRateLimit({
+                          ...editingRateLimit,
+                          followPerHour: parseInt(e.target.value)
+                        })
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                      min="1"
+                      max="100"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Follows per Day
+                    </label>
+                    <input
+                      type="number"
+                      value={editingRateLimit.followPerDay}
+                      onChange={(e) =>
+                        setEditingRateLimit({
+                          ...editingRateLimit,
+                          followPerDay: parseInt(e.target.value)
+                        })
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                      min="1"
+                      max="1000"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="flex items-center">
+                    <input
+                      type="checkbox"
+                      checked={editingRateLimit.isActive}
+                      onChange={(e) =>
+                        setEditingRateLimit({
+                          ...editingRateLimit,
+                          isActive: e.target.checked
+                        })
+                      }
+                      className="mr-2"
+                    />
+                    <span className="text-sm font-medium text-gray-700">Active</span>
+                  </label>
+                </div>
+
+                <div className="flex justify-end gap-3 pt-4">
+                  <button
+                    onClick={() => setEditingRateLimit(null)}
+                    className="px-4 py-2 text-gray-600 hover:text-gray-800"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => updateRateLimit(editingRateLimit.id, editingRateLimit)}
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                  >
+                    Save Changes
                   </button>
                 </div>
               </div>

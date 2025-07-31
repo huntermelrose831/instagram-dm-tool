@@ -2,7 +2,7 @@ const puppeteer = require("puppeteer-extra");
 const StealthPlugin = require("puppeteer-extra-plugin-stealth");
 const fs = require("fs");
 const path = require("path");
-const accountsStore = require("./accountsStore");
+const AccountsService = require("./database/accounts");
 
 puppeteer.use(StealthPlugin());
 
@@ -12,7 +12,19 @@ async function loginAndSaveCookies(username, password) {
   const browser = await puppeteer.launch({
     headless: false,
     defaultViewport: null,
-    args: ["--start-maximized"],
+    args: [
+      "--start-maximized",
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-accelerated-2d-canvas",
+      "--no-first-run",
+      "--no-zygote",
+      "--disable-gpu",
+      "--disable-background-timer-throttling",
+      "--disable-backgrounding-occluded-windows",
+      "--disable-renderer-backgrounding"
+    ],
   });
 
   try {
@@ -44,12 +56,13 @@ async function loginAndSaveCookies(username, password) {
 
     // Get cookies and save them
     const cookies = await page.cookies();
-    accountsStore.upsertAccount({
-      username,
-      cookies,
-    });
+    const success = AccountsService.updateAccountCookies(username, cookies);
 
-    console.log("Login successful! Cookies saved.");
+    if (success) {
+      console.log("Login successful! Cookies saved to database.");
+    } else {
+      console.log("Login successful but failed to save cookies to database.");
+    }
 
     return { success: true };
   } catch (error) {

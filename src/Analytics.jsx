@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { timeAgo } from "./utils/timeAgo";
 import {
   FaChartLine,
   FaUsers,
@@ -39,6 +40,7 @@ const Analytics = () => {
     dailyStats: [],
     accountStats: [],
     campaignStats: [],
+    peakTimes: [], // For future use
   });
   useEffect(() => {
     fetchAnalytics();
@@ -60,9 +62,8 @@ const Analytics = () => {
       );
       if (response.ok) {
         const result = await response.json();
-        if (result.status === "success") {
-          setAnalytics(result.data);
-        }
+        // The backend now returns analytics data directly
+        setAnalytics(result);
       }
     } catch (error) {
       console.error("Error fetching analytics:", error);
@@ -334,66 +335,71 @@ const Analytics = () => {
             <h3 className="text-lg font-semibold text-gray-900 mb-6">
               Recent Activity
             </h3>
-            <div className="space-y-4">
-              {[
-                {
-                  action: "Message sent",
-                  account: "@account1",
-                  time: "2 minutes ago",
-                  status: "success",
-                },
-                {
-                  action: "Reply received",
-                  account: "@account2",
-                  time: "15 minutes ago",
-                  status: "success",
-                },
-                {
-                  action: "Campaign started",
-                  account: "@account3",
-                  time: "1 hour ago",
-                  status: "info",
-                },
-                {
-                  action: "Account connected",
-                  account: "@account4",
-                  time: "2 hours ago",
-                  status: "success",
-                },
-                {
-                  action: "Rate limit hit",
-                  account: "@account1",
-                  time: "3 hours ago",
-                  status: "warning",
-                },
-              ].map((activity, index) => (
-                <div
-                  key={index}
-                  className="flex items-center justify-between p-3 rounded-lg border border-gray-100"
-                >
-                  <div className="flex items-center gap-3">
+          <div className="space-y-4">
+            {(analytics.recentActivity && analytics.recentActivity.length > 0
+              ? analytics.recentActivity.map((activity, index) => {
+                  // Map backend action_type to readable action
+                  let actionLabel = activity.action_type.replace(/_/g, " ");
+                  actionLabel =
+                    actionLabel.charAt(0).toUpperCase() + actionLabel.slice(1);
+                  // Status color
+                  let statusColor =
+                    activity.status === "success"
+                      ? "bg-green-500"
+                      : activity.status === "warning"
+                        ? "bg-yellow-500"
+                        : activity.status === "error"
+                          ? "bg-red-500"
+                          : "bg-blue-500";
+                  return (
                     <div
-                      className={`w-2 h-2 rounded-full ${
-                        activity.status === "success"
-                          ? "bg-green-500"
-                          : activity.status === "warning"
-                            ? "bg-yellow-500"
-                            : "bg-blue-500"
-                      }`}
-                    />
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">
-                        {activity.action}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        {activity.account}
-                      </p>
+                      key={index}
+                      className="flex items-center justify-between p-3 rounded-lg border border-gray-100"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`w-2 h-2 rounded-full ${statusColor}`} />
+                        <div>
+                          <p className="text-sm font-medium text-gray-900">
+                            {actionLabel}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            @{activity.username}
+                          </p>
+                        </div>
+                      </div>
+                      <span className="text-xs text-gray-500">{timeAgo(activity.created_at)}</span>
                     </div>
+                  );
+                })
+              : [
+                  // fallback mock data if no activity
+                  {
+                    action: "No recent activity",
+                    account: "-",
+                    time: "-",
+                    status: "info",
+                  },
+                ].map((activity, index) => (
+                  <div
+                    key={index}
+                    className="flex items-center justify-between p-3 rounded-lg border border-gray-100"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-2 h-2 rounded-full bg-gray-400" />
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">
+                          {activity.action}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          {activity.account}
+                        </p>
+                      </div>
+                    </div>
+                    <span className="text-xs text-gray-500">{activity.time}</span>
                   </div>
-                  <span className="text-xs text-gray-500">{activity.time}</span>
-                </div>
-              ))}
-            </div>
+                ))
+            )}
+          </div>
           </div>
         </div>
       </div>

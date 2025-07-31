@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, memo } from "react";
+import { FaRegQuestionCircle } from "react-icons/fa";
 import { motion } from "framer-motion";
 import {
   MdAdd,
@@ -18,455 +19,46 @@ import {
   MdClose,
 } from "react-icons/md";
 
-// Extract modal component outside to prevent re-creation
-const CreateCampaignModal = memo(
-  ({
-    newCampaign,
-    accounts,
-    handleNewCampaignChange,
-    setShowCreateModal,
-    createCampaign,
-  }) => (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-gray-900 rounded-lg p-6 w-96 border border-gray-700">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-white">
-            Create New Campaign
-          </h3>
-          <button
-            onClick={() => setShowCreateModal(false)}
-            className="text-gray-400 hover:text-white"
-          >
-            <MdClose size={20} />
-          </button>
-        </div>
 
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Campaign Name *
-            </label>
-            <input
-              type="text"
-              value={newCampaign.name}
-              onChange={(e) => handleNewCampaignChange("name", e.target.value)}
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white focus:border-green-500 focus:outline-none"
-              placeholder="Enter campaign name"
-              autoFocus
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Account
-            </label>
-            <select
-              value={newCampaign.account_username}
-              onChange={(e) =>
-                handleNewCampaignChange("account_username", e.target.value)
-              }
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white focus:border-green-500 focus:outline-none"
+// Simple reusable modal
+const EditModal = ({ isOpen, onClose, title, children, onSave }) => {
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-60">
+      <div className="bg-gray-900 rounded-lg p-6 w-full max-w-md border border-gray-700 relative">
+        <button
+          className="absolute top-3 right-3 text-gray-400 hover:text-white"
+          onClick={onClose}
+        >
+          <MdClose size={22} />
+        </button>
+        <h2 className="text-xl font-semibold text-white mb-4">{title}</h2>
+        <div>{children}</div>
+        {onSave && (
+          <div className="flex justify-end mt-6 gap-2">
+            <button
+              className="px-4 py-2 bg-green-500 hover:bg-green-400 text-black rounded-lg font-medium"
+              onClick={onSave}
             >
-              <option value="">Select Account</option>
-              {accounts.map((account) => (
-                <option key={account.username} value={account.username}>
-                  @{account.username}
-                </option>
-              ))}
-            </select>
+              Save
+            </button>
+            <button
+              className="px-4 py-2 text-gray-400 hover:text-white"
+              onClick={onClose}
+            >
+              Cancel
+            </button>
           </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Daily Limit
-            </label>
-            <input
-              type="number"
-              value={newCampaign.daily_limit}
-              onChange={(e) =>
-                handleNewCampaignChange("daily_limit", parseInt(e.target.value))
-              }
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded-lg text-white focus:border-green-500 focus:outline-none"
-              min="1"
-              max="200"
-            />
-          </div>
-        </div>
-
-        <div className="flex items-center justify-end gap-3 mt-6">
-          <button
-            onClick={() => setShowCreateModal(false)}
-            className="px-4 py-2 text-gray-400 hover:text-white transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={createCampaign}
-            disabled={!newCampaign.name.trim()}
-            className="px-4 py-2 bg-green-500 hover:bg-green-400 disabled:bg-gray-600 disabled:text-gray-400 text-black rounded-lg font-medium transition-colors"
-          >
-            Create Campaign
-          </button>
-        </div>
+        )}
       </div>
     </div>
-  )
-);
-
-const Campaigns = () => {
-  const [campaigns, setCampaigns] = useState([]);
-  const [selectedCampaign, setSelectedCampaign] = useState(null);
-  const [activeTab, setActiveTab] = useState("settings");
-  const [isLoading, setIsLoading] = useState(true);
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [editingCampaign, setEditingCampaign] = useState(null);
-  const [newCampaign, setNewCampaign] = useState({
-    name: "",
-    account_username: "",
-    daily_limit: 50,
-    status: "draft",
-  });
-  const [accounts, setAccounts] = useState([]);
-  const [targets, setTargets] = useState([]);
-  const [newTarget, setNewTarget] = useState("");
-  const [showAddTarget, setShowAddTarget] = useState(false);
-  const [replies, setReplies] = useState([]);
-  useEffect(() => {
-    fetchCampaigns();
-    fetchAccounts();
-  }, []);
-  useEffect(() => {
-    // Initialize editing campaign when selected campaign changes
-    if (selectedCampaign) {
-      setEditingCampaign({ ...selectedCampaign });
-      fetchTargets(selectedCampaign.id);
-      fetchReplies(selectedCampaign.id);
-    }
-  }, [selectedCampaign]);
-
-  const fetchCampaigns = async () => {
-    try {
-      const res = await fetch("http://localhost:5000/api/campaigns");
-      const data = await res.json();
-      if (data.status === "success") {
-        setCampaigns(data.campaigns);
-        if (data.campaigns.length > 0 && !selectedCampaign) {
-          setSelectedCampaign(data.campaigns[0]);
-        }
-      }
-    } catch (error) {
-      console.error("Error fetching campaigns:", error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-  const fetchAccounts = async () => {
-    try {
-      const response = await fetch("http://localhost:5000/api/accounts");
-      const data = await response.json();
-      if (Array.isArray(data)) {
-        setAccounts(data);
-      }
-    } catch (error) {
-      console.error("Error fetching accounts:", error);
-    }
-  };
-
-  const fetchTargets = async (campaignId) => {
-    if (!campaignId) return;
-    try {
-      const response = await fetch(
-        `http://localhost:5000/api/campaigns/${campaignId}/targets`
-      );
-      if (response.ok) {
-        const data = await response.json();
-        setTargets(data.targets || []);
-      }
-    } catch (error) {
-      console.error("Error fetching targets:", error);
-    }
-  };
-
-  const addTarget = async (username) => {
-    if (!selectedCampaign || !username.trim()) return;
-
-    try {
-      const response = await fetch(
-        `http://localhost:5000/api/campaigns/${selectedCampaign.id}/targets`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username: username.replace("@", "") }),
-        }
-      );
-
-      if (response.ok) {
-        fetchTargets(selectedCampaign.id);
-        setNewTarget("");
-        setShowAddTarget(false);
-      } else {
-        const errorData = await response.json();
-        alert(errorData.message || "Failed to add target");
-      }
-    } catch (error) {
-      console.error("Error adding target:", error);
-      alert("Network error: Failed to add target");
-    }
-  };
-
-  const removeTarget = async (targetId) => {
-    if (!selectedCampaign) return;
-
-    try {
-      const response = await fetch(
-        `http://localhost:5000/api/campaigns/${selectedCampaign.id}/targets/${targetId}`,
-        {
-          method: "DELETE",
-        }
-      );
-
-      if (response.ok) {
-        fetchTargets(selectedCampaign.id);
-      } else {
-        const errorData = await response.json();
-        alert(errorData.message || "Failed to remove target");
-      }
-    } catch (error) {
-      console.error("Error removing target:", error);
-      alert("Network error: Failed to remove target");
-    }
-  };
-
-  const fetchReplies = async (campaignId) => {
-    if (!campaignId) return;
-    try {
-      const response = await fetch(
-        `http://localhost:5000/api/campaigns/${campaignId}/replies`
-      );
-      if (response.ok) {
-        const data = await response.json();
-        setReplies(data.replies || []);
-      }
-    } catch (error) {
-      console.error("Error fetching replies:", error);
-    }
-  };
-  const updateCampaignField = useCallback((field, value) => {
-    setEditingCampaign((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        [field]: value,
-      };
-    });
-  }, []);
-  const saveCampaignChanges = useCallback(async () => {
-    if (!editingCampaign) return;
-
-    try {
-      const response = await fetch(
-        `http://localhost:5000/api/campaigns/${editingCampaign.id}`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(editingCampaign),
-        }
-      );
-
-      if (response.ok) {
-        // Update local state
-        setCampaigns((prev) =>
-          prev.map((c) => (c.id === editingCampaign.id ? editingCampaign : c))
-        );
-        setSelectedCampaign(editingCampaign);
-      }
-    } catch (error) {
-      console.error("Error updating campaign:", error);
-    }
-  }, [editingCampaign]);
-
-  // Memoized handlers for new campaign form
-  const handleNewCampaignChange = useCallback((field, value) => {
-    setNewCampaign((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
-  }, []);
-
-  const createCampaign = async () => {
-    if (!newCampaign.name.trim()) return;
-
-    console.log("Creating campaign with data:", newCampaign);
-
-    try {
-      const campaignData = {
-        name: newCampaign.name,
-        account_username: newCampaign.account_username,
-        message_variations: ["Default message"], // Default message array
-        target_usernames: [], // Empty target array initially
-        schedule_time: null,
-        is_scheduled: false,
-      };
-
-      console.log("Sending campaign data to API:", campaignData);
-
-      const response = await fetch("http://localhost:5000/api/campaigns", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(campaignData),
-      });
-
-      console.log("Response status:", response.status);
-
-      if (response.ok) {
-        const result = await response.json();
-        console.log("Campaign created successfully:", result);
-        fetchCampaigns(); // Refresh campaigns list
-        setShowCreateModal(false);
-        setNewCampaign({
-          name: "",
-          account_username: "",
-          daily_limit: 50,
-          status: "draft",
-        });
-      } else {
-        const errorData = await response.json();
-        console.error("Campaign creation failed:", errorData);
-        alert(errorData.message || "Failed to create campaign");
-      }
-    } catch (error) {
-      console.error("Error creating campaign:", error);
-      alert("Network error: Failed to create campaign");
-    }
-  };
-
-  const launchCampaign = async (campaignId) => {
-    try {
-      const response = await fetch(
-        `http://localhost:5000/api/campaigns/${campaignId}/launch`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-        }
-      );
-
-      if (response.ok) {
-        const result = await response.json();
-        console.log("Campaign launched:", result);
-        fetchCampaigns(); // Refresh to get updated status
-      } else {
-        const errorData = await response.json();
-        alert(errorData.message || "Failed to launch campaign");
-      }
-    } catch (error) {
-      console.error("Error launching campaign:", error);
-      alert("Network error: Failed to launch campaign");
-    }
-  };
-
-  const pauseCampaign = async (campaignId) => {
-    try {
-      const response = await fetch(
-        `http://localhost:5000/api/campaigns/${campaignId}/pause`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-        }
-      );
-
-      if (response.ok) {
-        const result = await response.json();
-        console.log("Campaign paused:", result);
-        fetchCampaigns(); // Refresh to get updated status
-      } else {
-        const errorData = await response.json();
-        alert(errorData.message || "Failed to pause campaign");
-      }
-    } catch (error) {
-      console.error("Error pausing campaign:", error);
-      alert("Network error: Failed to pause campaign");
-    }
-  };
-
-  const deleteCampaign = async (campaignId) => {
-    if (!confirm("Are you sure you want to delete this campaign?")) return;
-
-    try {
-      const response = await fetch(
-        `http://localhost:5000/api/campaigns/${campaignId}`,
-        {
-          method: "DELETE",
-        }
-      );
-
-      if (response.ok) {
-        console.log("Campaign deleted");
-        fetchCampaigns(); // Refresh campaigns list
-        if (selectedCampaign?.id === campaignId) {
-          setSelectedCampaign(null);
-        }
-      } else {
-        const errorData = await response.json();
-        alert(errorData.message || "Failed to delete campaign");
-      }
-    } catch (error) {
-      console.error("Error deleting campaign:", error);
-      alert("Network error: Failed to delete campaign");
-    }
-  };
-
-  const CampaignCard = ({ campaign, isSelected, onClick }) => (
-    <motion.div
-      whileHover={{ scale: 1.02 }}
-      className={`p-4 rounded-lg border cursor-pointer transition-all duration-200 ${
-        isSelected
-          ? "bg-green-500/10 border-green-500 shadow-lg"
-          : "bg-gray-900 border-gray-700 hover:border-gray-600"
-      }`}
-      onClick={onClick}
-    >
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="font-semibold text-white truncate">{campaign.name}</h3>
-        <div
-          className={`px-2 py-1 rounded-full text-xs font-medium ${
-            campaign.status === "active"
-              ? "bg-green-500/20 text-green-400"
-              : "bg-gray-500/20 text-gray-400"
-          }`}
-        >
-          {campaign.status}
-        </div>
-      </div>
-      <div className="grid grid-cols-3 gap-2 text-sm text-gray-400">
-        <div>
-          <div className="font-medium text-white">
-            {campaign.success_count || 0}
-          </div>
-          <div>Messages Sent</div>
-        </div>
-        <div>
-          <div className="font-medium text-white">
-            {campaign.response_count || 0}
-          </div>
-          <div>Replies</div>
-        </div>
-        <div>
-          <div className="font-medium text-white">
-            {campaign.success_count > 0
-              ? Math.round(
-                  (campaign.response_count / campaign.success_count) * 100
-                )
-              : 0}
-            %
-          </div>
-          <div>Reply Rate</div>
-        </div>
-      </div>
-    </motion.div>
   );
+};
+
+function Campaigns() {
+  // Header for selected campaign
   const CampaignHeader = ({ campaign }) => {
     const [showActions, setShowActions] = useState(false);
-
     return (
       <div className="bg-gray-900 border-b border-gray-800 p-6">
         <div className="flex items-center justify-between">
@@ -474,7 +66,7 @@ const Campaigns = () => {
             <h1 className="text-2xl font-bold text-white">
               {campaign?.name || "New Campaign"}
             </h1>
-            <button className="text-gray-400 hover:text-white">
+            <button className="text-gray-400 hover:text-white" onClick={() => openEditModal(campaign)}>
               <MdEdit size={20} />
             </button>
           </div>
@@ -550,37 +142,131 @@ const Campaigns = () => {
       </div>
     );
   };
-
-  const TabNavigation = () => {
-    const tabs = [
-      { id: "settings", label: "SETTINGS", icon: MdSettings },
-      { id: "targets", label: "TARGETS", icon: MdGroup },
-      { id: "sequences", label: "SEQUENCES", icon: MdEmail },
-      { id: "accounts", label: "ACCOUNTS", icon: MdAccountCircle },
-      { id: "replies", label: "REPLIES", icon: MdReply },
-    ];
-
-    return (
-      <div className="bg-gray-800 border-b border-gray-700">
-        <div className="flex">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex-1 flex flex-col items-center py-4 px-6 text-sm font-medium transition-colors ${
-                activeTab === tab.id
-                  ? "text-white bg-gray-700 border-b-2 border-green-500"
-                  : "text-gray-400 hover:text-white hover:bg-gray-750"
-              }`}
-            >
-              <tab.icon size={20} className="mb-1" />
-              {tab.label}
-            </button>
-          ))}
+  // Card for campaign list in sidebar
+  const CampaignCard = ({ campaign, isSelected, onClick }) => (
+    <motion.div
+      whileHover={{ scale: 1.02 }}
+      className={`p-4 rounded-lg border cursor-pointer transition-all duration-200 ${
+        isSelected
+          ? "bg-green-500/10 border-green-500 shadow-lg"
+          : "bg-gray-900 border-gray-700 hover:border-gray-600"
+      }`}
+      onClick={onClick}
+    >
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="font-semibold text-white truncate">{campaign.name}</h3>
+        <div
+          className={`px-2 py-1 rounded-full text-xs font-medium ${
+            campaign.status === "active"
+              ? "bg-green-500/20 text-green-400"
+              : "bg-gray-500/20 text-gray-400"
+          }`}
+        >
+          {campaign.status}
         </div>
       </div>
-    );
+      <div className="grid grid-cols-3 gap-2 text-sm text-gray-400">
+        <div>
+          <div className="font-medium text-white">
+            {campaign.success_count || 0}
+          </div>
+          <div>Messages Sent</div>
+        </div>
+        <div>
+          <div className="font-medium text-white">
+            {campaign.response_count || 0}
+          </div>
+          <div>Replies</div>
+        </div>
+        <div>
+          <div className="font-medium text-white">
+            {campaign.success_count > 0
+              ? Math.round(
+                  (campaign.response_count / campaign.success_count) * 100
+                )
+              : 0}
+            %
+          </div>
+          <div>Reply Rate</div>
+        </div>
+      </div>
+    </motion.div>
+  );
+  // Fetch campaigns and accounts on mount
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [campaignsRes, accountsRes] = await Promise.all([
+          fetch("http://localhost:5000/api/campaigns"),
+          fetch("http://localhost:5000/api/accounts"),
+        ]);
+        const campaignsData = await campaignsRes.json();
+        const accountsData = await accountsRes.json();
+        setCampaigns(Array.isArray(campaignsData) ? campaignsData : campaignsData.campaigns || []);
+        setAccounts(Array.isArray(accountsData) ? accountsData : accountsData.accounts || []);
+      } catch (err) {
+        // Optionally handle error
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchData();
+  }, []);
+
+  // State variables
+  const [isLoading, setIsLoading] = useState(true);
+  const [campaigns, setCampaigns] = useState([]);
+  const [selectedCampaign, setSelectedCampaign] = useState(null);
+  const [accounts, setAccounts] = useState([]);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [newCampaign, setNewCampaign] = useState({
+    name: "",
+    account_username: "",
+    daily_limit: 50,
+    status: "draft",
+  });
+  const [editingCampaign, setEditingCampaign] = useState(null);
+  const [activeTab, setActiveTab] = useState("settings");
+  const [showAddTarget, setShowAddTarget] = useState(false);
+  const [newTarget, setNewTarget] = useState("");
+  const [targets, setTargets] = useState([]);
+  const [replies, setReplies] = useState([]);
+
+  // Sync editingCampaign with selectedCampaign when it changes, and reset tab
+  useEffect(() => {
+    setEditingCampaign(selectedCampaign ? { ...selectedCampaign } : null);
+    setActiveTab("settings");
+  }, [selectedCampaign]);
+
+  // Save changes to the editing campaign
+  const saveCampaignChanges = useCallback(async () => {
+    if (!editingCampaign) return;
+    try {
+      const response = await fetch(`http://localhost:5000/api/campaigns/${editingCampaign.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editingCampaign),
+      });
+      if (response.ok) {
+        const updated = await response.json();
+        setCampaigns((prev) =>
+          prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c))
+        );
+        setSelectedCampaign((prev) =>
+          prev && prev.id === updated.id ? { ...prev, ...updated } : prev
+        );
+      }
+    } catch (err) {
+      // Optionally handle error
+    }
+  }, [editingCampaign]);
+
+  // Update a field in the editing campaign
+  const updateCampaignField = (field, value) => {
+    setEditingCampaign((prev) => ({ ...prev, [field]: value }));
   };
+
+  // ...existing code...
   const SettingsPanel = ({ campaign }) => (
     <div className="p-6 space-y-6">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -1014,17 +700,17 @@ const Campaigns = () => {
   const renderTabContent = () => {
     switch (activeTab) {
       case "settings":
-        return <SettingsPanel campaign={selectedCampaign} />;
+        return <SettingsPanel campaign={editingCampaign} />;
       case "sequences":
-        return <SequencesPanel campaign={selectedCampaign} />;
+        return <SequencesPanel campaign={editingCampaign} />;
       case "targets":
-        return <TargetsPanel campaign={selectedCampaign} />;
+        return <TargetsPanel campaign={editingCampaign} />;
       case "accounts":
-        return <AccountsPanel campaign={selectedCampaign} />;
+        return <AccountsPanel campaign={editingCampaign} />;
       case "replies":
-        return <RepliesPanel campaign={selectedCampaign} />;
+        return <RepliesPanel campaign={editingCampaign} />;
       default:
-        return <SettingsPanel campaign={selectedCampaign} />;
+        return <SettingsPanel campaign={editingCampaign} />;
     }
   };
 
@@ -1035,6 +721,42 @@ const Campaigns = () => {
       </div>
     );
   }
+
+// Tab navigation for campaign details (move outside Campaigns)
+const TabNavigation = ({ activeTab, setActiveTab, selectedCampaign }) => {
+  const tabs = [
+    { key: "settings", label: "Settings", icon: <MdSettings size={18} /> },
+    { key: "sequences", label: "Sequences", icon: <MdEmail size={18} /> },
+    { key: "targets", label: "Targets", icon: <MdGroup size={18} /> },
+    { key: "accounts", label: "Accounts", icon: <MdAccountCircle size={18} /> },
+    { key: "replies", label: "Replies", icon: <MdReply size={18} /> },
+  ];
+  return (
+    <div className="bg-gray-900 border-b border-gray-800 px-6 flex gap-2">
+      {tabs.map((tab) => (
+        <button
+          key={tab.key}
+          onClick={() => setActiveTab(tab.key)}
+          className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors focus:outline-none ${
+            activeTab === tab.key
+              ? "text-white border-green-500"
+              : "text-gray-400 border-transparent hover:text-white"
+          }`}
+          disabled={!selectedCampaign}
+        >
+          {tab.icon}
+          {tab.label}
+        </button>
+      ))}
+      <button
+        className="ml-auto text-gray-400 hover:text-white"
+        title="Help"
+      >
+        <FaRegQuestionCircle size={18} />
+      </button>
+    </div>
+  );
+};
 
   return (
     <div className="min-h-screen bg-black text-white">
@@ -1080,7 +802,7 @@ const Campaigns = () => {
         {/* Main Content */}
         <div className="flex-1 flex flex-col">
           <CampaignHeader campaign={selectedCampaign} />
-          <TabNavigation />
+          <TabNavigation activeTab={activeTab} setActiveTab={setActiveTab} selectedCampaign={selectedCampaign} />
           <div className="flex-1 overflow-y-auto bg-gray-950">
             {renderTabContent()}
           </div>

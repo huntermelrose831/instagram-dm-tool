@@ -136,33 +136,39 @@ class AccountsService {
 
   // Get accounts with health data
   static getAccountsWithHealth() {
-    const stmt = db.prepare(`
-      SELECT 
-        username,
-        email,
-        status,
-        risk_score,
-        warnings_count,
-        last_active,
-        created_at,
-        updated_at
-      FROM instagram_accounts 
-      ORDER BY risk_score ASC
-    `);
+    try {
+      const stmt = db.prepare(`
+        SELECT 
+          username,
+          email,
+          status,
+          COALESCE(risk_score, 0) as risk_score,
+          COALESCE(warnings_count, 0) as warnings_count,
+          last_active,
+          created_at,
+          updated_at
+        FROM instagram_accounts 
+        ORDER BY COALESCE(risk_score, 0) ASC
+      `);
 
-    const accounts = stmt.all();
+      const accounts = stmt.all();
 
-    return accounts.map((account) => ({
-      ...account,
-      isActive: account.status === "active",
-      riskScore: account.risk_score || 0,
-      riskLevel:
-        account.risk_score > 50
-          ? "high"
-          : account.risk_score > 20
-            ? "medium"
-            : "low",
-    }));
+      return accounts.map((account) => ({
+        ...account,
+        isActive: account.status === "active",
+        riskScore: account.risk_score || 0,
+        riskLevel:
+          account.risk_score > 50
+            ? "high"
+            : account.risk_score > 20
+              ? "medium"
+              : "low",
+      }));
+    } catch (error) {
+      console.error("Error fetching accounts with health data:", error);
+      // Return empty array on error
+      return [];
+    }
   }
 }
 
