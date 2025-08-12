@@ -44,22 +44,6 @@ const Home = () => {
       description: "Manage multiple Instagram accounts and stay authenticated.",
       color: "yellow",
     },
-    {
-      to: "/campaigns",
-      icon: FaRocket,
-      title: "Campaigns",
-      description:
-        "Create and manage DM campaigns with A/B testing and sequences.",
-      color: "pink",
-    },
-    {
-      to: "/analytics",
-      icon: FaChartLine,
-      title: "Analytics",
-      description:
-        "Track performance, reply rates, and campaign effectiveness.",
-      color: "indigo",
-    },
   ];
 
   return (
@@ -72,24 +56,16 @@ const Home = () => {
               TurboDM
             </h1>
             <p className="text-xl text-gray-700 mb-8 max-w-2xl mx-auto">
-              Scale your Instagram outreach with intelligent automation,
-              advanced targeting, and comprehensive analytics. Built for modern
-              marketers and growth hackers.
+              Scale your Instagram outreach with intelligent automation and
+              advanced targeting. Built for modern marketers and growth hackers.
             </p>
-            <div className="flex justify-center space-x-4">
+            <div className="flex justify-center">
               <Link
-                to="/campaigns"
+                to="/send-dm"
                 className="bg-green-600 hover:bg-green-700 px-8 py-3 rounded-lg font-semibold transition-colors flex items-center text-white"
               >
                 <FaPlay className="mr-2" />
                 Get Started
-              </Link>
-              <Link
-                to="/analytics"
-                className="border border-gray-400 hover:border-gray-600 px-8 py-3 rounded-lg font-semibold transition-colors flex items-center text-black"
-              >
-                <FaChartLine className="mr-2" />
-                View Analytics
               </Link>
             </div>
           </div>
@@ -101,11 +77,10 @@ const Home = () => {
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-12">
             <h2 className="text-3xl font-bold text-black mb-4">
-              Everything You Need for Instagram Growth
+              Instagram Outreach Made Simple
             </h2>
             <p className="text-gray-600 text-lg">
-              Powerful tools to automate, track, and optimize your Instagram
-              outreach campaigns
+              Powerful tools to automate and optimize your Instagram outreach
             </p>
           </div>
 

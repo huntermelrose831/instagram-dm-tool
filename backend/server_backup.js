@@ -1,26 +1,16 @@
 const express = require("express");
 const cors = require("cors");
-const helmet = require("helmet");
-const rateLimit = require("express-rate-limit");
-const morgan = require("morgan");
-const path = require("path");
-const fs = require("fs");
-
-// Import custom utilities
-const logger = require("./utils/logger");
-const { notFound, errorHandler, sanitize } = require("./utils/middleware");
-const { validate } = require("./utils/validator");
-const db = require("./database/db");
-
-// Import business logic modules
 const { sendDMs } = require("./sendDMs");
+const puppeteer = require("puppeteer");
 const { initializeScheduler, RATE_LIMITS } = require("./scheduler");
 const accountsStore = require("./accountsStore");
 const targetsStore = require("./targetsStore");
-const { scrapeProduct } = require("./puppeteerScraper");
-const { scrapeFollowers } = require("./followerScraper");
-const { scrapeHashtag } = require("./hashtagScraper");
-const { scrapeKeyword } = require("./keywordScraper");
+const { scrapeProduct } = require('./puppeteerScraper');
+// Import follower scraper
+const { scrapeFollowers } = require('./followerScraper');
+// Import hashtag and keyword scrapers
+const { scrapeHashtag } = require('./hashtagScraper');
+const { scrapeKeyword } = require('./keywordScraper');
 
 // Import all database services
 const {
@@ -45,102 +35,20 @@ const ratelimits = require("./database/ratelimits.js");
 // Import message monitoring system
 const { messageMonitor } = require("./messageMonitor");
 
-require("dotenv").config();
-
 const app = express();
-const PORT = process.env.PORT || 5000;
-const VERSION = process.env.npm_package_version || "1.0.0";
+const PORT = 5000;
+require("dotenv").config();
 
 // Custom delay function using Promise
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Create logs directory if it doesn't exist
-const logDir = path.join(__dirname, "logs");
-if (!fs.existsSync(logDir)) {
-  fs.mkdirSync(logDir);
-}
-
-// Setup HTTP request logging
-const accessLogStream = fs.createWriteStream(path.join(logDir, "access.log"), {
-  flags: "a",
-});
-app.use(morgan("combined", { stream: accessLogStream }));
-app.use(morgan("dev"));
-
-// Security middleware
-app.use(
-  helmet({
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'"],
-        styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", "data:", "https://instagram.com"],
-      },
-    },
-    referrerPolicy: { policy: "same-origin" },
-  })
-);
-
-// Rate limiting to prevent abuse
-const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: "Too many requests from this IP, please try again later.",
-});
-
-// Apply rate limiting to all API routes
-app.use("/api", apiLimiter);
-
-// Configure CORS properly for production
-app.use(
-  cors({
-    origin:
-      process.env.NODE_ENV === "production"
-        ? process.env.FRONTEND_URL || "http://localhost:3000"
-        : "*",
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-  })
-);
-
-// Body parser with size limits to prevent large payload attacks
-app.use(express.json({ limit: "1mb" }));
-
-// Apply sanitization middleware
-app.use(sanitize);
+app.use(cors({ origin: "*", credentials: true }));
+app.use(express.json());
 
 // Initialize the scheduler when the server starts
 initializeScheduler();
 
-// Health check endpoint
-app.get("/health", (req, res) => {
-  try {
-    // Check database connection
-    const dbCheck = db.prepare("SELECT 1").get();
-
-    res.json({
-      status: "healthy",
-      version: VERSION,
-      uptime: process.uptime(),
-      timestamp: new Date().toISOString(),
-      dbConnection: dbCheck ? "connected" : "error",
-      environment: process.env.NODE_ENV || "development",
-    });
-  } catch (error) {
-    logger.error(`Health check failed: ${error.message}`);
-    res.status(500).json({
-      status: "unhealthy",
-      error: error.message,
-      timestamp: new Date().toISOString(),
-    });
-  }
-});
-
-app.post("/api/send-dms", validate("sendDM"), async (req, res, next) => {
+app.post("/api/send-dms", async (req, res) => {
   try {
     const {
       username,
@@ -151,13 +59,25 @@ app.post("/api/send-dms", validate("sendDM"), async (req, res, next) => {
       messageVariations,
     } = req.body;
 
-    logger.info(
-      `Processing DM request from ${username} to ${usernames.length} recipients`
-    );
+    console.log("=== /api/send-dms REQUEST ===");
+    console.log("Request body:", JSON.stringify(req.body, null, 2));
+
+    if (
+      !username ||
+      !usernames ||
+      (!message && (!messageVariations || messageVariations.length === 0))
+    ) {
+      return res.status(400).json({
+        status: "error",
+        message: "Missing required fields",
+        details: { username, usernames, message, messageVariations },
+      });
+    }
 
     // Handle scheduling
     if (scheduled && scheduleTime) {
-      logger.info(`Scheduling DM for ${username} at ${scheduleTime}`);
+      console.log("Scheduling DM for later execution...");
+      console.log("Schedule time received:", scheduleTime);
 
       // Use messageVariations if provided, otherwise use the single message
       const variations =
@@ -170,7 +90,7 @@ app.post("/api/send-dms", validate("sendDM"), async (req, res, next) => {
           fromUsername: username,
           targetUsernames: usernames,
           messageVariations: variations,
-          scheduleTime: scheduleTime,
+          scheduleTime: scheduleTime, // Pass the datetime-local string directly
           isRecurring: false,
           recurringInterval: null,
         });
@@ -182,17 +102,15 @@ app.post("/api/send-dms", validate("sendDM"), async (req, res, next) => {
           scheduledFor: scheduleTime,
         });
       } catch (scheduleError) {
-        logger.error(
-          `Failed to schedule DM for ${username}: ${scheduleError.message}`
-        );
-        return next(scheduleError);
+        console.error("Error scheduling DM:", scheduleError);
+        return res.status(500).json({
+          status: "error",
+          message: "Failed to schedule DM: " + scheduleError.message,
+        });
       }
     } else {
       // Send immediately
-      logger.info(
-        `Sending immediate DM from ${username} to ${usernames.length} recipients`
-      );
-
+      console.log("Sending DM immediately...");
       await sendDMs({
         igUsername: username,
         usernames,
@@ -205,34 +123,53 @@ app.post("/api/send-dms", validate("sendDM"), async (req, res, next) => {
       });
     }
   } catch (err) {
-    logger.error(`DM sending error: ${err.message}`);
-    next(err);
+    console.error("DM sending error:", err);
+    res.status(500).json({
+      status: "error",
+      message: err.message || "Failed to send DMs",
+    });
   }
 });
 
-// Import account service for Puppeteer-based account management
-const { addAccount } = require("./services/accountService");
-
-app.post("/api/add-account", validate("login"), async (req, res, next) => {
+app.post("/api/add-account", async (req, res) => {
   const { username, password } = req.body;
   try {
-    // Use the extracted accountService
-    const result = await addAccount(username, password);
-
-    if (result.success) {
-      res.json({
-        status: "success",
-        message: result.message,
+    // Launch Puppeteer, login, and save cookies
+    const puppeteer = require("puppeteer");
+    const browser = await puppeteer.launch({ 
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"]
+    });
+    const page = await browser.newPage();
+    await page.goto("https://www.instagram.com/accounts/login/", {
+      waitUntil: "networkidle2",
+    });
+    await page.waitForSelector('input[name="username"]', { timeout: 15000 });
+    await page.type('input[name="username"]', username, { delay: 100 });
+    await page.type('input[name="password"]', password, { delay: 100 });
+    await Promise.all([
+      page.click('button[type="submit"]'),
+      page.waitForNavigation({ waitUntil: "networkidle2" }),
+    ]);
+    // Check for login success
+    let loginSuccess = false;
+    try {
+      await page.waitForSelector('svg[aria-label="New post"]', {
+        timeout: 15000,
       });
-    } else {
-      res.status(401).json({
-        status: "error",
-        message: result.message,
-      });
+      loginSuccess = true;
+    } catch (e) {}
+    if (!loginSuccess) {
+      await browser.close();
+      return res.status(401).json({ status: "error", message: "Login failed" });
     }
+    // Save cookies
+    const cookies = await page.cookies();
+    accountsStore.upsertAccount({ username, cookies });
+    await browser.close();
+    res.json({ status: "success", message: "Account added and cookies saved" });
   } catch (err) {
-    logger.error(`Error adding account ${username}: ${err.message}`);
-    next(err);
+    res.status(500).json({ status: "error", message: err.message });
   }
 });
 
@@ -278,7 +215,7 @@ app.post("/api/accounts/login", async (req, res) => {
     if (!username || !password) {
       return res.status(400).json({
         status: "error",
-        message: "Username and password are required",
+        message: "Username and password are required"
       });
     }
 
@@ -287,32 +224,33 @@ app.post("/api/accounts/login", async (req, res) => {
     if (!account) {
       return res.status(404).json({
         status: "error",
-        message: "Account not found. Please add the account first.",
+        message: "Account not found. Please add the account first."
       });
     }
 
     console.log(`Starting Instagram login process for ${username}...`);
-
+    
     // Import and run the login function
-    const { loginAndSaveCookies } = require("./login");
+    const { loginAndSaveCookies } = require('./login');
     const result = await loginAndSaveCookies(username, password);
 
     if (result.success) {
       res.json({
         status: "success",
-        message: "Successfully logged in and saved cookies to Instagram",
+        message: "Successfully logged in and saved cookies to Instagram"
       });
     } else {
       res.status(500).json({
         status: "error",
-        message: "Login failed - please check your credentials",
+        message: "Login failed - please check your credentials"
       });
     }
+
   } catch (error) {
     console.error("Error during Instagram login:", error);
     res.status(500).json({
       status: "error",
-      message: error.message || "Login process failed",
+      message: error.message || "Login process failed"
     });
   }
 });
@@ -365,19 +303,15 @@ app.delete("/api/accounts/id/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const accountId = parseInt(id);
-
+    
     // Get all accounts to find the one with matching ID
     const accounts = AccountsService.getAccounts();
-    const accountToDelete = accounts.find(
-      (account) => account.id === accountId
-    );
-
+    const accountToDelete = accounts.find(account => account.id === accountId);
+    
     if (!accountToDelete) {
-      return res
-        .status(404)
-        .json({ status: "error", message: "Account not found" });
+      return res.status(404).json({ status: "error", message: "Account not found" });
     }
-
+    
     const success = AccountsService.deleteAccount(accountToDelete.username);
 
     if (success) {
@@ -414,9 +348,7 @@ app.post("/api/scrape/accounts", async (req, res) => {
     }
 
     const targetUsername = usernameMatch[1];
-    console.log(
-      `Scraping followers for: ${targetUsername} using account: ${igUsername}`
-    );
+    console.log(`Scraping followers for: ${targetUsername} using account: ${igUsername}`);
 
     // Use the new follower scraper with authentication
     const followers = await scrapeFollowers(postUrl, igUsername);
@@ -445,16 +377,15 @@ app.post("/api/scrape/accounts", async (req, res) => {
       }
     });
 
-    console.log(
-      `Processed ${storedCount} leads from ${targetUsername}'s followers`
-    );
-    res.json({
-      status: "success",
+    console.log(`Processed ${storedCount} leads from ${targetUsername}'s followers`);
+    res.json({ 
+      status: "success", 
       leads,
       totalFound: followers.length,
       totalStored: storedCount,
-      message: `Successfully scraped ${storedCount} followers from ${targetUsername} using account ${igUsername}`,
+      message: `Successfully scraped ${storedCount} followers from ${targetUsername} using account ${igUsername}` 
     });
+
   } catch (err) {
     console.error("Error scraping leads:", err);
     res.status(500).json({ status: "error", message: err.message });
@@ -469,9 +400,7 @@ app.post("/api/scrape/posts", async (req, res) => {
     console.log("Using account:", igUsername);
 
     if (!igUsername) {
-      return res
-        .status(400)
-        .json({ error: "Instagram username is required for authentication" });
+      return res.status(400).json({ error: "Instagram username is required for authentication" });
     }
 
     // Use your own Puppeteer scraper with authentication
@@ -519,7 +448,7 @@ app.post("/api/scrape/hashtags", async (req, res) => {
     if (!postUrl || typeof postUrl !== "string") {
       return res.status(400).json({
         status: "error",
-        message: "Missing or invalid hashtag input",
+        message: "Missing or invalid hashtag input"
       });
     }
 
@@ -530,8 +459,7 @@ app.post("/api/scrape/hashtags", async (req, res) => {
       if (accounts.length === 0) {
         return res.status(400).json({
           status: "error",
-          message:
-            "No Instagram accounts available. Please add an account first.",
+          message: "No Instagram accounts available. Please add an account first."
         });
       }
       accountToUse = accounts[0].username;
@@ -540,11 +468,11 @@ app.post("/api/scrape/hashtags", async (req, res) => {
 
     // Extract hashtag from input (remove # if present)
     const hashtag = postUrl.replace(/^#/, "").trim();
-
+    
     if (!hashtag) {
       return res.status(400).json({
         status: "error",
-        message: "Invalid hashtag input",
+        message: "Invalid hashtag input"
       });
     }
 
@@ -583,7 +511,7 @@ app.post("/api/scrape/hashtags", async (req, res) => {
       leads,
       totalFound: usernames.length,
       totalStored: storedCount,
-      message: `Successfully scraped ${storedCount} usernames from hashtag #${hashtag}`,
+      message: `Successfully scraped ${storedCount} usernames from hashtag #${hashtag}`
     });
   } catch (error) {
     console.error("Error scraping hashtag:", error);
@@ -605,7 +533,7 @@ app.post("/api/scrape/keywords", async (req, res) => {
     if (!keywords || typeof keywords !== "string") {
       return res.status(400).json({
         status: "error",
-        message: "Missing or invalid keywords input",
+        message: "Missing or invalid keywords input"
       });
     }
 
@@ -616,17 +544,14 @@ app.post("/api/scrape/keywords", async (req, res) => {
       if (accounts.length === 0) {
         return res.status(400).json({
           status: "error",
-          message:
-            "No Instagram accounts available. Please add an account first.",
+          message: "No Instagram accounts available. Please add an account first."
         });
       }
       accountToUse = accounts[0].username;
       console.log("No account specified, using first available:", accountToUse);
     }
 
-    console.log(
-      `Searching for keywords: "${keywords}" using account: ${accountToUse}`
-    );
+    console.log(`Searching for keywords: "${keywords}" using account: ${accountToUse}`);
 
     // Use the new Puppeteer-based keyword scraper
     const usernames = await scrapeKeyword(keywords, accountToUse, maxPosts);
@@ -656,15 +581,13 @@ app.post("/api/scrape/keywords", async (req, res) => {
       }
     });
 
-    console.log(
-      `Processed ${storedCount} leads from keyword search: "${keywords}"`
-    );
+    console.log(`Processed ${storedCount} leads from keyword search: "${keywords}"`);
     res.json({
       status: "success",
       leads,
       totalFound: usernames.length,
       totalStored: storedCount,
-      message: `Successfully found ${storedCount} usernames for keywords: "${keywords}"`,
+      message: `Successfully found ${storedCount} usernames for keywords: "${keywords}"`
     });
   } catch (error) {
     console.error("Error searching keywords:", error);
@@ -898,6 +821,248 @@ app.delete("/api/scheduled-jobs/:jobId/delete", async (req, res) => {
   }
 });
 
+// Campaign Management Routes
+app.get("/api/campaigns", async (req, res) => {
+  try {
+    const campaigns = await getCampaigns();
+    res.json({ status: "success", campaigns });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+app.post("/api/campaigns", async (req, res) => {
+  try {
+    const {
+      name,
+      account_username,
+      message_variations,
+      target_usernames,
+      schedule_time,
+      is_scheduled,
+    } = req.body; // Validate the account exists
+    const account = AccountsService.getAccountByUsername(account_username);
+    if (!account) {
+      return res.status(400).json({
+        status: "error",
+        message: "Selected account not found",
+      });
+    }
+
+    const campaignId = await createCampaign({
+      name,
+      account_username,
+      message_variations,
+      target_usernames,
+      schedule_time: is_scheduled ? schedule_time : null,
+      is_scheduled,
+    });
+
+    res.json({
+      status: "success",
+      message: "Campaign created successfully",
+      campaignId,
+    });
+  } catch (error) {
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+app.patch("/api/campaigns/:id/status", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+    await updateCampaignStatus(id, status);
+    res.json({
+      status: "success",
+      message: "Campaign status updated successfully",
+    });
+  } catch (err) {
+    console.error("Failed to update campaign status:", err);
+    res.status(500).json({
+      status: "error",
+      message: "Failed to update campaign status",
+      error: err.message,
+    });
+  }
+});
+
+app.delete("/api/campaigns/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    await deleteCampaign(id);
+    res.json({
+      status: "success",
+      message: "Campaign deleted successfully",
+    });
+  } catch (err) {
+    console.error("Failed to delete campaign:", err);
+    res.status(500).json({
+      status: "error",
+      message: "Failed to delete campaign",
+      error: err.message,
+    });
+  }
+});
+
+// Launch campaign endpoint
+app.post("/api/campaigns/:id/launch", async (req, res) => {
+  try {
+    const { id } = req.params;
+    await updateCampaignStatus(id, "active");
+    res.json({
+      status: "success",
+      message: "Campaign launched successfully",
+    });
+  } catch (err) {
+    console.error("Failed to launch campaign:", err);
+    res.status(500).json({
+      status: "error",
+      message: "Failed to launch campaign",
+      error: err.message,
+    });
+  }
+});
+
+// Pause campaign endpoint
+app.post("/api/campaigns/:id/pause", async (req, res) => {
+  try {
+    const { id } = req.params;
+    await updateCampaignStatus(id, "paused");
+    res.json({
+      status: "success",
+      message: "Campaign paused successfully",
+    });
+  } catch (err) {
+    console.error("Failed to pause campaign:", err);
+    res.status(500).json({
+      status: "error",
+      message: "Failed to pause campaign",
+      error: err.message,
+    });
+  }
+});
+
+// Update campaign endpoint
+app.put("/api/campaigns/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updateData = req.body;
+
+    // Update campaign in database (you'll need to implement this function)
+    // For now, we'll just update the status
+    await updateCampaignStatus(id, updateData.status || "draft");
+
+    res.json({
+      status: "success",
+      message: "Campaign updated successfully",
+    });
+  } catch (err) {
+    console.error("Failed to update campaign:", err);
+    res.status(500).json({
+      status: "error",
+      message: "Failed to update campaign",
+      error: err.message,
+    });
+  }
+});
+
+// Get campaign targets - Updated to use database service
+app.get("/api/campaigns/:id/targets", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const targets = getCampaignTargets(id);
+    res.json({ targets });
+  } catch (err) {
+    console.error("Failed to get campaign targets:", err);
+    res.status(500).json({
+      status: "error",
+      message: "Failed to get campaign targets",
+      error: err.message,
+    });
+  }
+});
+
+// Add campaign target - Updated to use database service
+app.post("/api/campaigns/:id/targets", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { username } = req.body;
+
+    if (!username) {
+      return res.status(400).json({
+        status: "error",
+        message: "Username is required",
+      });
+    }
+
+    const success = addCampaignTarget(id, username);
+
+    if (success) {
+      res.json({
+        status: "success",
+        message: "Target added successfully",
+      });
+    } else {
+      res.status(400).json({
+        status: "error",
+        message: "Target already exists or campaign not found",
+      });
+    }
+  } catch (err) {
+    console.error("Failed to add campaign target:", err);
+    res.status(500).json({
+      status: "error",
+      message: "Failed to add campaign target",
+      error: err.message,
+    });
+  }
+});
+
+// Remove campaign target - Updated to use database service
+app.delete("/api/campaigns/:id/targets/:targetId", async (req, res) => {
+  try {
+    const { id, targetId } = req.params;
+
+    const success = removeCampaignTarget(id, targetId);
+
+    if (success) {
+      res.json({
+        status: "success",
+        message: "Target removed successfully",
+      });
+    } else {
+      res.status(404).json({
+        status: "error",
+        message: "Target not found",
+      });
+    }
+  } catch (err) {
+    console.error("Failed to remove campaign target:", err);
+    res.status(500).json({
+      status: "error",
+      message: "Failed to remove campaign target",
+      error: err.message,
+    });
+  }
+});
+
+// Get campaign replies - Updated to use database service
+app.get("/api/campaigns/:id/replies", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const replies = getCampaignReplies(id);
+    res.json({ replies });
+  } catch (err) {
+    console.error("Failed to get campaign replies:", err);
+    res.status(500).json({
+      status: "error",
+      message: "Failed to get campaign replies",
+      error: err.message,
+    });
+  }
+});
+
 // CRM Routes
 app.get("/api/crm/contacts", async (req, res) => {
   try {
@@ -994,6 +1159,460 @@ app.post("/api/crm/contacts/:id/interactions", async (req, res) => {
     res.json({ status: "success" });
   } catch (error) {
     console.error("Error recording interaction:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+// Analytics Endpoints - Updated to use AnalyticsService
+app.get("/api/analytics", async (req, res) => {
+  try {
+    // Support ?range=7d or ?start=YYYY-MM-DD&end=YYYY-MM-DD
+    let startDate, endDate;
+    if (req.query.start && req.query.end) {
+      startDate = new Date(req.query.start);
+      endDate = new Date(req.query.end);
+    } else {
+      const days = parseInt((req.query.range || "7d").replace(/[^0-9]/g, "")) || 7;
+      endDate = new Date();
+      startDate = new Date();
+      startDate.setDate(endDate.getDate() - days);
+    }
+
+    // Get comprehensive analytics
+    const analyticsData = await analytics.getAnalytics(startDate, endDate);
+    const peakTimes = analytics.getPeakResponseTimes();
+
+    // Get recent activity (last 10 actions)
+    let recentActivity = [];
+    try {
+      const db = require("./database/db");
+      const stmt = db.prepare(`
+        SELECT username, action_type, details, status, created_at
+        FROM activity_logs
+        ORDER BY created_at DESC
+        LIMIT 10
+      `);
+      recentActivity = stmt.all();
+    } catch (err) {
+      console.error("Error fetching recent activity:", err);
+    }
+
+    res.json({
+      ...analyticsData,
+      peakTimes,
+      recentActivity,
+    });
+  } catch (error) {
+    console.error("Error fetching analytics:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+// Dashboard Stats Endpoint - Updated to use analytics service
+app.get("/api/dashboard/stats", async (req, res) => {
+  try {
+    const dashboardStats = analytics.getDashboardStats();
+
+    // Get additional stats from the database
+    const activeAccounts = AccountsService.getAccounts().filter(
+      (a) => a.isActive
+    ).length;
+
+    res.json({
+      activeJobs: dashboardStats.activeJobs || 0,
+      completedToday: dashboardStats.completedToday || 0,
+      successRate: dashboardStats.successRate || 0,
+      activeAccounts: activeAccounts,
+    });
+  } catch (error) {
+    console.error("Error fetching dashboard stats:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+// ============================================================
+// SMART AUTOMATION ENDPOINTS
+// ============================================================
+
+// Get all automation rules
+app.get("/api/automation/rules", async (req, res) => {
+  try {
+    const { active_only = "true" } = req.query;
+    const rules = AutomationService.getAutomationRules(active_only === "true");
+    res.json({
+      status: "success",
+      rules: rules,
+    });
+  } catch (error) {
+    console.error("Error fetching automation rules:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+// Create new automation rule
+app.post("/api/automation/rules", async (req, res) => {
+  try {
+    const ruleData = req.body;
+    const result = AutomationService.createAutomationRule(ruleData);
+    res.json({
+      status: "success",
+      message: "Automation rule created successfully",
+      ruleId: result.lastInsertRowid,
+    });
+  } catch (error) {
+    console.error("Error creating automation rule:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+// Toggle automation rule active status
+app.patch("/api/automation/rules/:id/toggle", async (req, res) => {
+  try {
+    const ruleId = parseInt(req.params.id);
+    const { is_active } = req.body;
+
+    AutomationService.toggleAutomationRule(ruleId, is_active);
+    res.json({
+      status: "success",
+      message: `Rule ${is_active ? "activated" : "deactivated"} successfully`,
+    });
+  } catch (error) {
+    console.error("Error toggling automation rule:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+// Delete automation rule
+app.delete("/api/automation/rules/:id", async (req, res) => {
+  try {
+    const ruleId = parseInt(req.params.id);
+    AutomationService.deleteAutomationRule(ruleId);
+    res.json({
+      status: "success",
+      message: "Automation rule deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting automation rule:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+// Get follow-up sequences
+app.get("/api/automation/sequences", async (req, res) => {
+  try {
+    const { active_only = "true" } = req.query;
+    const sequences = AutomationService.getFollowupSequences(
+      active_only === "true"
+    );
+    res.json({
+      status: "success",
+      sequences: sequences,
+    });
+  } catch (error) {
+    console.error("Error fetching follow-up sequences:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+app.post("/api/automation/sequences", async (req, res) => {
+  try {
+    const sequenceData = req.body;
+    const result = AutomationService.createFollowupSequence(sequenceData);
+    res.json({
+      status: "success",
+      message: "Follow-up sequence created successfully",
+      sequenceId: result.lastInsertRowid,
+    });
+  } catch (error) {
+    console.error("Error creating follow-up sequence:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+// Analyze message sentiment
+app.post("/api/automation/analyze-message", async (req, res) => {
+  try {
+    const { contact_id, message_text } = req.body;
+    const analysis = AutomationService.analyzeMessage(contact_id, message_text);
+    res.json({
+      status: "success",
+      analysis: analysis,
+    });
+  } catch (error) {
+    console.error("Error analyzing message:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+// Get high-value leads
+app.get("/api/automation/high-value-leads", async (req, res) => {
+  try {
+    const { limit = 50 } = req.query;
+    const leads = AutomationService.getHighValueLeads(parseInt(limit));
+    res.json({
+      status: "success",
+      leads: leads,
+    });
+  } catch (error) {
+    console.error("Error fetching high-value leads:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+// Get automation metrics
+app.get("/api/automation/metrics", async (req, res) => {
+  try {
+    const { timeframe = "30d" } = req.query;
+    const metrics = AutomationService.getAutomationMetrics(timeframe);
+    res.json({
+      status: "success",
+      metrics: metrics,
+    });
+  } catch (error) {
+    console.error("Error fetching automation metrics:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+// Get rule performance
+app.get("/api/automation/rules/performance", async (req, res) => {
+  try {
+    const performance = AutomationService.getRulePerformance();
+    res.json({
+      status: "success",
+      performance: performance,
+    });
+  } catch (error) {
+    console.error("Error fetching rule performance:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+// Get sequence performance
+app.get("/api/automation/sequences/performance", async (req, res) => {
+  try {
+    const performance = AutomationService.getSequencePerformance();
+    res.json({
+      status: "success",
+      performance: performance,
+    });
+  } catch (error) {
+    console.error("Error fetching sequence performance:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+// Manual trigger automation for a contact
+app.post("/api/automation/trigger", async (req, res) => {
+  try {
+    const { contact_id, message_text, rule_id } = req.body;
+
+    if (rule_id) {
+      // Trigger specific rule
+      const rules = AutomationService.getAutomationRules();
+      const rule = rules.find((r) => r.id === rule_id);
+      if (rule) {
+        const result = await AutomationService.executeAutomationRule(
+          rule,
+          contact_id,
+          { manual: true }
+        );
+        res.json({
+          status: "success",
+          message: "Automation rule executed successfully",
+          result: result,
+        });
+      } else {
+        res.status(404).json({ status: "error", message: "Rule not found" });
+      }
+    } else {
+      // Find and trigger matching rules
+      const triggeredRules = AutomationService.getTriggeredRules(
+        contact_id,
+        message_text || ""
+      );
+      const results = [];
+
+      for (const rule of triggeredRules) {
+        try {
+          const result = await AutomationService.executeAutomationRule(
+            rule,
+            contact_id,
+            { manual: true }
+          );
+          results.push({ ruleId: rule.id, ruleName: rule.name, result });
+        } catch (error) {
+          results.push({
+            ruleId: rule.id,
+            ruleName: rule.name,
+            error: error.message,
+          });
+        }
+      }
+
+      res.json({
+        status: "success",
+        message: `Triggered ${triggeredRules.length} automation rules`,
+        results: results,
+      });
+    }
+  } catch (error) {
+    console.error("Error triggering automation:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+// Smart Automation Routes
+app.get("/api/automation", async (req, res) => {
+  try {
+    // Mock automation data - replace with actual database queries
+    const mockAutoResponders = [
+      {
+        id: 1,
+        name: "Welcome Message",
+        type: "auto-responder",
+        isActive: true,
+        priority: 1,
+        triggers: [{ type: "first-message", value: "any" }],
+        actions: [
+          {
+            type: "send-message",
+            config: { message: "Thanks for reaching out! How can I help you?" },
+          },
+        ],
+        executionCount: 45,
+      },
+      {
+        id: 2,
+        name: "Product Inquiry Response",
+        type: "auto-responder",
+        isActive: true,
+        priority: 2,
+        triggers: [
+          { type: "keyword", value: "product" },
+          { type: "keyword", value: "price" },
+        ],
+        actions: [
+          {
+            type: "send-message",
+            config: {
+              message:
+                "I'd love to tell you about our products! Let me share some details.",
+            },
+          },
+          { type: "add-to-crm", config: { tag: "product-interest" } },
+        ],
+        executionCount: 23,
+      },
+    ];
+
+    const mockFollowUpSequences = [
+      {
+        id: 3,
+        name: "Lead Nurturing Sequence",
+        type: "follow-up-sequence",
+        isActive: true,
+        priority: 1,
+        triggers: [{ type: "tag-added", value: "lead" }],
+        actions: [
+          {
+            type: "schedule-follow-up",
+            config: {
+              delay: "1 day",
+              message:
+                "Hi! Just checking if you had any questions about our conversation?",
+            },
+          },
+          {
+            type: "schedule-follow-up",
+            config: {
+              delay: "3 days",
+              message:
+                "Hope you're doing well! I wanted to follow up on our chat.",
+            },
+          },
+          {
+            type: "schedule-follow-up",
+            config: {
+              delay: "1 week",
+              message: "Last check-in! Is there anything I can help you with?",
+            },
+          },
+        ],
+        executionCount: 12,
+      },
+    ];
+
+    res.json({
+      status: "success",
+      autoResponders: mockAutoResponders,
+      followUpSequences: mockFollowUpSequences,
+    });
+  } catch (error) {
+    console.error("Error fetching automations:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+app.post("/api/automation", async (req, res) => {
+  try {
+    const { name, type, triggers, conditions, actions, isActive, priority } =
+      req.body;
+
+    if (!name || !type || !triggers || !actions) {
+      return res.status(400).json({
+        status: "error",
+        message: "Missing required fields",
+      });
+    }
+
+    // Here you would save to database
+    const automationId = Date.now(); // Mock ID generation
+
+    console.log(`Creating new automation: ${name} (${type})`);
+
+    res.json({
+      status: "success",
+      message: "Automation created successfully",
+      automationId,
+    });
+  } catch (error) {
+    console.error("Error creating automation:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+app.patch("/api/automation/:id/toggle", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { isActive } = req.body;
+
+    console.log(
+      `Toggling automation ${id} to ${isActive ? "active" : "inactive"}`
+    );
+
+    res.json({
+      status: "success",
+      message: `Automation ${isActive ? "activated" : "deactivated"} successfully`,
+    });
+  } catch (error) {
+    console.error("Error toggling automation:", error);
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
+
+app.delete("/api/automation/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    console.log(`Deleting automation ${id}`);
+
+    res.json({
+      status: "success",
+      message: "Automation deleted successfully",
+    });
+  } catch (error) {
+    console.error("Error deleting automation:", error);
     res.status(500).json({ status: "error", message: error.message });
   }
 });
@@ -1136,23 +1755,16 @@ app.get("/api/account-safety/rate-limits", async (req, res) => {
 // Create new rate limit
 app.post("/api/account-safety/rate-limits", async (req, res) => {
   try {
-    const {
-      accountId,
-      dmPerHour,
-      dmPerDay,
-      followPerHour,
-      followPerDay,
-      isActive,
-    } = req.body;
-
+    const { accountId, dmPerHour, dmPerDay, followPerHour, followPerDay, isActive } = req.body;
+    
     // Get account by ID
     const accounts = AccountsService.getAccounts();
-    const account = accounts.find((acc) => acc.id == accountId);
-
+    const account = accounts.find(acc => acc.id == accountId);
+    
     if (!account) {
-      return res.status(404).json({
-        status: "error",
-        message: "Account not found",
+      return res.status(404).json({ 
+        status: "error", 
+        message: "Account not found" 
       });
     }
 
@@ -1166,7 +1778,7 @@ app.post("/api/account-safety/rate-limits", async (req, res) => {
     };
 
     const rateLimitId = RateLimitService.createRateLimit(rateLimitData);
-
+    
     res.json({
       status: "success",
       message: "Rate limit created successfully",
@@ -1185,7 +1797,7 @@ app.put("/api/account-safety/rate-limits/:id", async (req, res) => {
     const updates = req.body;
 
     const success = RateLimitService.updateRateLimit(id, updates);
-
+    
     if (success) {
       res.json({
         status: "success",
@@ -1209,7 +1821,7 @@ app.delete("/api/account-safety/rate-limits/:id", async (req, res) => {
     const { id } = req.params;
 
     const success = RateLimitService.deleteRateLimit(id);
-
+    
     if (success) {
       res.json({
         status: "success",
@@ -1288,68 +1900,20 @@ app.get("/api/account-safety/health-check/:accountId", async (req, res) => {
   }
 });
 
-// Apply error handling middleware - must be after all routes
-app.use(notFound);
-app.use(errorHandler);
-
-// Clean shutdown handling
-process.on("SIGTERM", gracefulShutdown);
-process.on("SIGINT", gracefulShutdown);
-
-async function gracefulShutdown() {
-  logger.info("Received shutdown signal, closing connections gracefully...");
-
-  // Stop all message monitoring
-  try {
-    if (messageMonitor) {
-      await messageMonitor.stopAllMonitoring();
-      logger.info("All message monitors stopped");
-    }
-  } catch (err) {
-    logger.error("Error stopping message monitors:", err);
-  }
-
-  // Close database connection
-  try {
-    const db = require("./database/db");
-    db.close();
-    logger.info("Database connection closed");
-  } catch (err) {
-    logger.error("Error closing database connection:", err);
-  }
-
-  logger.info("Shutdown complete, exiting process");
-  process.exit(0);
-}
-
-// Start the server
 app.listen(PORT, () => {
-  logger.info(
-    `Server running in ${process.env.NODE_ENV || "development"} mode`
-  );
-  logger.info(`Server listening on http://localhost:${PORT}`);
+  console.log(`Server running on http://localhost:${PORT}`);
 
   // Initialize rate limit counters
   setInterval(
     () => {
-      try {
-        ratelimits.resetHourlyCounters();
-        logger.debug("Hourly rate limit counters reset");
-      } catch (err) {
-        logger.error("Error resetting hourly counters:", err);
-      }
+      ratelimits.resetHourlyCounters();
     },
     60 * 60 * 1000
   ); // Every hour
 
   setInterval(
     () => {
-      try {
-        ratelimits.resetDailyCounters();
-        logger.debug("Daily rate limit counters reset");
-      } catch (err) {
-        logger.error("Error resetting daily counters:", err);
-      }
+      ratelimits.resetDailyCounters();
     },
     24 * 60 * 60 * 1000
   ); // Every day
@@ -1572,7 +2136,7 @@ app.get("/api/reports/scheduled", async (req, res) => {
       },
       {
         id: 2,
-        name: "Weekly DM Summary",
+        name: "Weekly Analytics",
         frequency: "weekly",
         time: "08:00",
         recipients: ["team@company.com"],
@@ -1680,8 +2244,8 @@ app.get("/api/exports/jobs", async (req, res) => {
       },
       {
         id: 2,
-        name: "Lead Data Export",
-        type: "leads",
+        name: "Campaign Data Export",
+        type: "campaigns",
         status: "processing",
         progress: 67,
         createdAt: new Date(Date.now() - 900000).toISOString(),
@@ -1790,6 +2354,8 @@ app.get("/api/team/roles", async (req, res) => {
         permissions: [
           "view_dashboard",
           "send_messages",
+          "manage_campaigns",
+          "view_analytics",
           "export_data",
           "manage_leads",
           "manage_accounts",
@@ -1803,11 +2369,12 @@ app.get("/api/team/roles", async (req, res) => {
       {
         id: "manager",
         name: "Manager",
-        description: "Can manage leads and export data",
+        description: "Can manage campaigns and view analytics",
         permissions: [
           "view_dashboard",
           "send_messages",
-          "export_data",
+          "manage_campaigns",
+          "view_analytics",
           "manage_leads",
         ],
         color: "#F59E0B",
@@ -1848,7 +2415,7 @@ app.get("/api/team/templates", async (req, res) => {
       {
         id: 2,
         name: "Follow-up Sequence",
-        type: "workflow",
+        type: "automation",
         createdBy: "Sarah Johnson",
         createdAt: "2024-12-18",
         usage: 23,
@@ -2146,8 +2713,7 @@ app.post("/api/instagram/login", async (req, res) => {
     if (password) {
       return res.json({
         status: "success",
-        message:
-          "Login functionality temporarily simplified. Use /api/add-account for full Instagram login.",
+        message: "Login functionality temporarily simplified. Use /api/add-account for full Instagram login.",
         user: username,
       });
     } else {
@@ -2156,6 +2722,44 @@ app.post("/api/instagram/login", async (req, res) => {
         message: "Password required for login",
       });
     }
+
+    /* ORIGINAL CODE TEMPORARILY DISABLED
+    // The 'initialize' method is no longer separate.
+    // Login process itself will handle browser initialization via PuppeteerHelper.
+    // await instagramService.initialize(); // REMOVED
+
+    let loginSuccess = false;
+
+    // The refactored login method in InstagramService (via InstagramApi)
+    // should handle trying to load session / cookies first, then full login.
+    console.log(`Attempting login for: ${username}`);
+    // The single login method now handles both scenarios (with or without password)
+    loginSuccess = await instagramService.login(username, password);
+
+    // // First try to login with saved cookies - REMOVED, handled by login()
+    // console.log(`Attempting login with saved cookies for: ${username}`);
+    // loginSuccess = await instagramService.loginWithSavedCookies(username);
+
+    // // If saved cookies failed and password is provided, try fresh login - REMOVED, handled by login()    // if (!loginSuccess && password) {
+    //   console.log(
+    //     `Saved cookies failed, attempting fresh login for: ${username}`
+    //   );
+    //   loginSuccess = await instagramService.login(username, password);
+    // }
+
+    if (loginSuccess) {
+      res.json({
+        status: "success",
+        message: "Logged in successfully",
+        user: username,
+      });
+    } else {
+      res.status(401).json({
+        status: "error",
+        message: "Login failed. Please check your credentials or try again.",
+      });
+    }
+    */
   } catch (error) {
     console.error("Instagram login error in route:", error); // Added "in route" for clarity
     res.status(500).json({
@@ -2175,9 +2779,22 @@ app.get("/api/instagram/status", async (req, res) => {
       status: "success",
       isLoggedIn: false,
       currentUser: null,
-      message:
-        "Instagram service temporarily simplified. Use /api/accounts to check saved accounts.",
+      message: "Instagram service temporarily simplified. Use /api/accounts to check saved accounts."
     });
+
+    /* ORIGINAL CODE TEMPORARILY DISABLED
+    const isLoggedIn =
+      instagramService && instagramService.instagramApi.getIsLoggedIn();
+    const currentUser = isLoggedIn
+      ? instagramService.instagramApi.getCurrentUser()
+      : null;
+
+    res.json({
+      status: "success",
+      isLoggedIn,
+      currentUser,
+    });
+    */
   } catch (error) {
     console.error("Error getting status:", error);
     res.status(500).json({

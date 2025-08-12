@@ -2,22 +2,14 @@ import React from "react";
 import {
   MdSendToMobile,
   MdAccountCircle,
-  MdCampaign,
-  MdSchedule,
   MdDashboard,
-  MdSecurity,
-  MdPsychology,
   MdAssessment,
   MdGroup,
 } from "react-icons/md";
 import {
   FaCompass,
-  FaRectangleList,
-  FaBolt,
-  FaCrosshairs,
 } from "react-icons/fa6";
-import { FaUserFriends } from "react-icons/fa";
-import { IoStatsChartSharp } from "react-icons/io5";
+import { FaUserFriends, FaBolt } from "react-icons/fa";
 import { Link, useLocation } from "react-router-dom";
 
 const Navbar = () => {
@@ -32,15 +24,7 @@ const Navbar = () => {
       text: "Accounts & Safety",
       size: 24,
     },
-    { path: "/campaigns", icon: MdCampaign, text: "Campaigns", size: 24 },
-    { path: "/automation", icon: MdPsychology, text: "Automation", size: 24 },
     { path: "/crm", icon: FaUserFriends, text: "CRM", size: 22 },
-    {
-      path: "/analytics",
-      icon: IoStatsChartSharp,
-      text: "Analytics",
-      size: 24,
-    },
     { path: "/reports", icon: MdAssessment, text: "Reports", size: 24 },
     { path: "/team", icon: MdGroup, text: "Team", size: 24 },
   ];

@@ -16,16 +16,10 @@ function getContacts(filters = {}) {
   let query = `
     SELECT 
       c.*,
-      GROUP_CONCAT(DISTINCT t.name) as tags,
-      GROUP_CONCAT(DISTINCT json_object(
-        'id', n.id,
-        'content', n.content,
-        'created_at', n.created_at
-      )) as notes
+      GROUP_CONCAT(DISTINCT t.name) as tags
     FROM crm_contacts c
     LEFT JOIN crm_contact_tags ct ON c.id = ct.contact_id
     LEFT JOIN crm_tags t ON ct.tag_id = t.id
-    LEFT JOIN crm_notes n ON c.id = n.contact_id
   `;
   const whereConditions = [];
   const params = [];
@@ -51,35 +45,19 @@ function getContacts(filters = {}) {
 
   query += " GROUP BY c.id ORDER BY c.last_interaction DESC NULLS LAST";
   const contacts = db.prepare(query).all(params);
+  
+  // Get notes separately to avoid JSON concatenation issues
+  const getNotesStmt = db.prepare(`
+    SELECT id, content, created_at 
+    FROM crm_notes 
+    WHERE contact_id = ? 
+    ORDER BY created_at DESC
+  `);
+  
   return contacts.map((contact) => ({
     ...contact,
     tags: contact.tags ? contact.tags.split(",") : [],
-    notes: contact.notes
-      ? contact.notes
-          .split(",")
-          .map((note) => {
-            try {
-              // Skip empty or null note strings
-              if (!note || note === "null" || note.trim() === "") {
-                return null;
-              }
-
-              const parsed = JSON.parse(note);
-              // Only include notes that have valid content and aren't just null values
-              if (parsed && parsed.content && parsed.content !== null) {
-                return parsed;
-              }
-              return null;
-            } catch (e) {
-              // Only log if the note is not a trivial null/empty value
-              if (note && note !== "null" && note.trim() !== "") {
-                console.error(`Error parsing note: ${note} | ${e.message}`);
-              }
-              return null;
-            }
-          })
-          .filter((note) => note !== null)
-      : [],
+    notes: getNotesStmt.all(contact.id) || [],
   }));
 }
 

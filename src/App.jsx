@@ -10,10 +10,7 @@ import Home from "./Home";
 import Targets from "./Targets";
 import Leads from "./Leads";
 import Accounts from "./Accounts";
-import Campaigns from "./Campaigns";
 import CRM from "./CRM";
-import Analytics from "./Analytics";
-import SmartAutomation from "./SmartAutomation";
 import ReportingExport from "./ReportingExport";
 import TeamCollaboration from "./TeamCollaboration";
 
@@ -31,10 +28,7 @@ function App() {
             <Route path="/targets" element={<Targets />} />
             <Route path="/leads" element={<Leads />} />
             <Route path="/accounts" element={<Accounts />} />
-            <Route path="/campaigns" element={<Campaigns/>} />
             <Route path="/crm" element={<CRM />} />
-            <Route path="/analytics" element={<Analytics />} />
-            <Route path="/automation" element={<SmartAutomation />} />
             <Route
               path="/safety"
               element={<Navigate to="/accounts" replace />}
@@ -43,6 +37,10 @@ function App() {
               path="/targeting"
               element={<Navigate to="/leads" replace />}
             />
+            {/* Redirect removed pages to home */}
+            <Route path="/campaigns" element={<Navigate to="/" replace />} />
+            <Route path="/analytics" element={<Navigate to="/" replace />} />
+            <Route path="/automation" element={<Navigate to="/" replace />} />
             <Route path="/reports" element={<ReportingExport />} />
             <Route path="/team" element={<TeamCollaboration />} />
           </Routes>

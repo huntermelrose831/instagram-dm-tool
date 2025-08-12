@@ -75,7 +75,7 @@ async function sendDMs({
       "Attempting to launch Puppeteer with working config (--no-sandbox)..."
     );
     browser = await puppeteer.launch({
-      headless: false,
+      headless: true,
       args: ["--no-sandbox", "--disable-setuid-sandbox"],
       timeout: 30000,
       protocolTimeout: 120000, // Increase protocol timeout for cookie operations
@@ -90,7 +90,7 @@ async function sendDMs({
       // Fallback configuration with additional sandbox args
       console.log("Attempting fallback Puppeteer config...");
       browser = await puppeteer.launch({
-        headless: false,
+        headless: true,
         defaultViewport: null,
         args: ["--no-sandbox", "--disable-setuid-sandbox"],
         timeout: 20000,
@@ -106,7 +106,7 @@ async function sendDMs({
         // Extended configuration with more args
         console.log("Attempting extended Puppeteer config...");
         browser = await puppeteer.launch({
-          headless: false,
+          headless: true,
           defaultViewport: null,
           args: [
             "--no-sandbox",

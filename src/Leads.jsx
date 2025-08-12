@@ -26,10 +26,14 @@ const Leads = () => {
   const [filterAccountType, setFilterAccountType] = useState("both"); // "private", "business", "both"
   const [filterFollowers, setFilterFollowers] = useState({ min: "", max: "" });
   const [filterPosts, setFilterPosts] = useState({ min: "", max: "" });
+  // Max posts filter for hashtag/keyword searches (1-10)
+  const [filterMaxPosts, setFilterMaxPosts] = useState(10);
 
   // Original Leads functionality
   const [searchType, setSearchType] = useState("posts");
   const [searchInput, setSearchInput] = useState("");
+  const [selectedAccount, setSelectedAccount] = useState("");
+  const [accounts, setAccounts] = useState([]);
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -54,7 +58,25 @@ const Leads = () => {
     if (activeTab === "advanced") {
       fetchTargets();
     }
+    fetchAccounts();
   }, [activeTab]);
+
+  // Fetch available accounts for follower scraping
+  const fetchAccounts = async () => {
+    try {
+      const response = await fetch("/api/accounts");
+      if (response.ok) {
+        const accountsData = await response.json();
+        setAccounts(accountsData || []);
+        // Set first account as default if available
+        if (accountsData && accountsData.length > 0) {
+          setSelectedAccount(accountsData[0].username);
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching accounts:", error);
+    }
+  };
 
   // Memoized input handlers to prevent re-rendering issues
   const handleSearchTypeChange = useCallback((value) => {
@@ -189,69 +211,6 @@ const Leads = () => {
       });
   };
 
-  const createScrapingJob = async () => {
-    setLoading(true);
-    try {
-      const response = await fetch(
-        "http://localhost:5000/api/targeting/scraping-jobs",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(newScrapingJob),
-        }
-      );
-
-      if (response.ok) {
-        fetchScrapingJobs();
-        setShowCreateModal(false);
-        resetScrapingForm();
-        setSuccess("Scraping job created successfully!");
-      }
-    } catch (error) {
-      console.error("Error creating scraping job:", error);
-      setError("Failed to create scraping job");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const toggleScrapingJob = async (jobId, isActive) => {
-    try {
-      await fetch(
-        `http://localhost:5000/api/targeting/scraping-jobs/${jobId}/toggle`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ isActive: !isActive }),
-        }
-      );
-      fetchScrapingJobs();
-    } catch (error) {
-      console.error("Error toggling scraping job:", error);
-    }
-  };
-
-  const resetScrapingForm = () => {
-    setNewScrapingJob({
-      name: "",
-      type: "competitor-followers",
-      targets: [],
-      filters: {
-        followerCount: { min: 100, max: 100000 },
-        followingCount: { min: 50, max: 5000 },
-        postsCount: { min: 10, max: null },
-        engagementRate: { min: 1, max: null },
-        location: "",
-        language: "en",
-        hasProfilePic: true,
-        hasWebsite: false,
-        isVerified: false,
-      },
-      maxLeads: 1000,
-      isActive: false,
-    });
-  };
-
   const handleSearch = async (e) => {
     e.preventDefault();
     if (!searchInput.trim()) return;
@@ -276,16 +235,53 @@ const Leads = () => {
         throw new Error("Please enter a valid Instagram profile URL");
       }
 
+      // Prepare request body based on search type
+      let requestBody = {};
+      if (searchType === "posts") {
+        // For posts scraping, we need both the post URL and an Instagram account to use
+        if (!selectedAccount) {
+          throw new Error(
+            "Please select an Instagram account to use for scraping"
+          );
+        }
+        requestBody = {
+          postUrl: searchInput,
+          igUsername: selectedAccount,
+        };
+      } else if (searchType === "accounts") {
+        // For accounts scraping, we need both the profile URL and an Instagram account to use
+        if (!selectedAccount) {
+          throw new Error(
+            "Please select an Instagram account to use for scraping"
+          );
+        }
+        requestBody = {
+          postUrl: searchInput, // Backend expects 'postUrl' for profile URL
+          igUsername: selectedAccount,
+        };
+      } else if (searchType === "hashtags") {
+        // Hashtag endpoint expects 'postUrl' containing the hashtag and optionally igUsername
+        requestBody = {
+          postUrl: searchInput,
+          igUsername: selectedAccount || undefined, // Optional for hashtags
+          maxPosts: filterMaxPosts, // Pass the max posts filter
+        };
+      } else if (searchType === "keywords") {
+        // Keywords endpoint expects 'postUrl' containing the keywords and optionally igUsername
+        requestBody = {
+          postUrl: searchInput,
+          igUsername: selectedAccount || undefined, // Optional for keywords
+          maxPosts: filterMaxPosts, // Pass the max posts filter
+        };
+      } else {
+        // Fallback for any other search types
+        requestBody = { query: searchInput };
+      }
+
       const response = await fetch(`/api/scrape/${searchType}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          [searchType === "posts"
-            ? "postUrl"
-            : searchType === "accounts"
-              ? "profileUrl"
-              : "query"]: searchInput,
-        }),
+        body: JSON.stringify(requestBody),
       });
       const data = await response.json();
       if (data.status === "success") {
@@ -330,15 +326,31 @@ const Leads = () => {
     }
   };
   const addAllToTargets = async () => {
+    // Check if there are any leads
+    if (leads.length === 0) {
+      setError("No leads available to add. Please search for leads first.");
+      setTimeout(() => setError(""), 3000);
+      return;
+    }
+
     const unadded = leads.filter((lead) => {
       const username = typeof lead === "string" ? lead : lead.username;
       return !addedLeads.has(username);
     });
 
+    if (unadded.length === 0) {
+      setSuccess("All leads already added to targets!");
+      setTimeout(() => setSuccess(""), 3000);
+      return;
+    }
+
     for (const lead of unadded) {
       const username = typeof lead === "string" ? lead : lead.username;
       await addToTargets(username);
     }
+
+    setSuccess(`Added ${unadded.length} leads to targets successfully!`);
+    setTimeout(() => setSuccess(""), 3000);
   };
   const exportLeads = (source = "discovery", format = "json") => {
     let dataToExport;
@@ -518,6 +530,80 @@ const Leads = () => {
                       />
                     </div>
 
+                    {/* Number of Posts Input for Hashtags/Keywords */}
+                    {(searchType === "hashtags" ||
+                      searchType === "keywords") && (
+                      <div className="mb-4">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Number of Posts to Scrape (1-10)
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={10}
+                          value={filterMaxPosts}
+                          onChange={(e) =>
+                            setFilterMaxPosts(
+                              Math.min(10, Math.max(1, Number(e.target.value)))
+                            )
+                          }
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-200 text-black"
+                        />
+                        <p className="text-sm text-gray-500 mt-1">
+                          Higher values will take longer to scrape but return
+                          more leads.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Account Selection for Authenticated Scraping */}
+                    {(searchType === "posts" ||
+                      searchType === "accounts" ||
+                      searchType === "hashtags" ||
+                      searchType === "keywords") && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          {searchType === "accounts" || searchType === "posts"
+                            ? "Select Instagram Account (Required)"
+                            : "Select Instagram Account (Optional)"}
+                        </label>
+                        <select
+                          value={selectedAccount}
+                          onChange={(e) => setSelectedAccount(e.target.value)}
+                          className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-200 text-black"
+                          required={
+                            searchType === "accounts" || searchType === "posts"
+                          }
+                        >
+                          <option value="">
+                            {searchType === "accounts" || searchType === "posts"
+                              ? "Select an account..."
+                              : "Use default account..."}
+                          </option>
+                          {accounts.map((account) => (
+                            <option
+                              key={account.username}
+                              value={account.username}
+                            >
+                              @{account.username}
+                            </option>
+                          ))}
+                        </select>
+                        {accounts.length === 0 && (
+                          <p className="text-sm text-gray-500 mt-1">
+                            No accounts available. Please add an account first.
+                          </p>
+                        )}
+                        {searchType !== "accounts" &&
+                          searchType !== "posts" && (
+                            <p className="text-sm text-gray-500 mt-1">
+                              Using an authenticated account improves scraping
+                              success rate.
+                            </p>
+                          )}
+                      </div>
+                    )}
+
                     <button
                       type="submit"
                       disabled={loading}
@@ -538,7 +624,7 @@ const Leads = () => {
                   </form>
                 </div>
 
-                {/* Actions */}
+                {/* Actions - Only visible when leads are available */}
                 {leads.length > 0 && (
                   <div className="bg-white border border-gray-200 rounded-lg p-6">
                     <h2 className="text-xl font-semibold text-black mb-4">
@@ -587,44 +673,7 @@ const Leads = () => {
                     </div>
                   )}
 
-                  {/* Advanced Filters UI */}
-                  <div className="mb-6 bg-gray-50 border border-gray-200 rounded-lg p-4">
-                    <h3 className="font-semibold text-black mb-2 flex items-center"><FaFilter className="mr-2" />Advanced Filters</h3>
-                    <div className="flex flex-wrap gap-4">
-                      <label className="flex items-center gap-2">
-                        <input type="checkbox" checked={filterProfilePic} onChange={e => setFilterProfilePic(e.target.checked)} />
-                        Has Profile Pic
-                      </label>
-                      <label className="flex items-center gap-2">
-                        <input type="checkbox" checked={filterBio} onChange={e => setFilterBio(e.target.checked)} />
-                        Has Bio
-                      </label>
-                      <label className="flex items-center gap-2">
-                        <input type="checkbox" checked={filterWebsite} onChange={e => setFilterWebsite(e.target.checked)} />
-                        Has Website
-                      </label>
-                      <label className="flex items-center gap-2">
-                        Account Type:
-                        <select value={filterAccountType} onChange={e => setFilterAccountType(e.target.value)} className="border rounded px-2 py-1">
-                          <option value="both">Both</option>
-                          <option value="private">Private</option>
-                          <option value="business">Business</option>
-                        </select>
-                      </label>
-                      <label className="flex items-center gap-2">
-                        Followers:
-                        <input type="number" placeholder="Min" className="w-16 border rounded px-1" value={filterFollowers.min} onChange={e => setFilterFollowers(f => ({...f, min: e.target.value}))} />
-                        -
-                        <input type="number" placeholder="Max" className="w-16 border rounded px-1" value={filterFollowers.max} onChange={e => setFilterFollowers(f => ({...f, max: e.target.value}))} />
-                      </label>
-                      <label className="flex items-center gap-2">
-                        Posts:
-                        <input type="number" placeholder="Min" className="w-16 border rounded px-1" value={filterPosts.min} onChange={e => setFilterPosts(f => ({...f, min: e.target.value}))} />
-                        -
-                        <input type="number" placeholder="Max" className="w-16 border rounded px-1" value={filterPosts.max} onChange={e => setFilterPosts(f => ({...f, max: e.target.value}))} />
-                      </label>
-                    </div>
-                  </div>
+                  {/* Advanced Filters section removed - now part of the search form */}
 
                   {/* Results Grid */}
                   {loading ? (
@@ -636,51 +685,123 @@ const Leads = () => {
                   ) : leads.length === 0 ? (
                     <div className="text-center py-12 text-gray-500">
                       <FaSearch className="mx-auto text-4xl mb-4" />
-                      <p className="text-lg">No leads found</p>
-                      <p className="text-sm">
-                        Try searching for Instagram posts, profiles, or hashtags
+                      <p className="text-lg font-bold">No usernames yet!</p>
+                      <p className="text-md mt-2">Ready to discover leads?</p>
+                      <p className="text-sm mt-4">
+                        Try copy and pasting Instagram posts, profile urls, or
+                        just use hashtags or keywords to find potential
+                        customers.
                       </p>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-96 overflow-y-auto">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                       {leads
                         .filter((lead) => {
                           // Exclude already-contacted leads
-                          const username = typeof lead === "string" ? lead : lead.username;
+                          const username =
+                            typeof lead === "string" ? lead : lead.username;
                           if (addedLeads.has(username)) return false;
 
                           // Profile Pic filter
-                          if (filterProfilePic && typeof lead === "object" && lead.profile_pic_url === "") return false;
-                          if (filterProfilePic && typeof lead === "object" && lead.profile_pic_url === undefined) return false;
-                          if (filterProfilePic && typeof lead === "string") return false;
+                          if (
+                            filterProfilePic &&
+                            typeof lead === "object" &&
+                            lead.profile_pic_url === ""
+                          )
+                            return false;
+                          if (
+                            filterProfilePic &&
+                            typeof lead === "object" &&
+                            lead.profile_pic_url === undefined
+                          )
+                            return false;
+                          if (filterProfilePic && typeof lead === "string")
+                            return false;
 
                           // Bio filter
-                          if (filterBio && typeof lead === "object" && (!lead.biography || lead.biography.trim() === "")) return false;
-                          if (filterBio && typeof lead === "string") return false;
+                          if (
+                            filterBio &&
+                            typeof lead === "object" &&
+                            (!lead.biography || lead.biography.trim() === "")
+                          )
+                            return false;
+                          if (filterBio && typeof lead === "string")
+                            return false;
 
                           // Website filter
-                          if (filterWebsite && typeof lead === "object" && (!lead.external_url || lead.external_url.trim() === "")) return false;
-                          if (filterWebsite && typeof lead === "string") return false;
+                          if (
+                            filterWebsite &&
+                            typeof lead === "object" &&
+                            (!lead.external_url ||
+                              lead.external_url.trim() === "")
+                          )
+                            return false;
+                          if (filterWebsite && typeof lead === "string")
+                            return false;
 
                           // Account type filter
-                          if (filterAccountType !== "both" && typeof lead === "object") {
-                            if (filterAccountType === "private" && !lead.is_private) return false;
-                            if (filterAccountType === "business" && !lead.is_business_account) return false;
+                          if (
+                            filterAccountType !== "both" &&
+                            typeof lead === "object"
+                          ) {
+                            if (
+                              filterAccountType === "private" &&
+                              !lead.is_private
+                            )
+                              return false;
+                            if (
+                              filterAccountType === "business" &&
+                              !lead.is_business_account
+                            )
+                              return false;
                           }
-                          if (filterAccountType !== "both" && typeof lead === "string") return false;
+                          if (
+                            filterAccountType !== "both" &&
+                            typeof lead === "string"
+                          )
+                            return false;
 
                           // Followers filter
-                          if (typeof lead === "object" && filterFollowers.min && lead.edge_followed_by && lead.edge_followed_by.count < parseInt(filterFollowers.min)) return false;
-                          if (typeof lead === "object" && filterFollowers.max && lead.edge_followed_by && lead.edge_followed_by.count > parseInt(filterFollowers.max)) return false;
+                          if (
+                            typeof lead === "object" &&
+                            filterFollowers.min &&
+                            lead.edge_followed_by &&
+                            lead.edge_followed_by.count <
+                              parseInt(filterFollowers.min)
+                          )
+                            return false;
+                          if (
+                            typeof lead === "object" &&
+                            filterFollowers.max &&
+                            lead.edge_followed_by &&
+                            lead.edge_followed_by.count >
+                              parseInt(filterFollowers.max)
+                          )
+                            return false;
 
                           // Posts filter
-                          if (typeof lead === "object" && filterPosts.min && lead.edge_owner_to_timeline_media && lead.edge_owner_to_timeline_media.count < parseInt(filterPosts.min)) return false;
-                          if (typeof lead === "object" && filterPosts.max && lead.edge_owner_to_timeline_media && lead.edge_owner_to_timeline_media.count > parseInt(filterPosts.max)) return false;
+                          if (
+                            typeof lead === "object" &&
+                            filterPosts.min &&
+                            lead.edge_owner_to_timeline_media &&
+                            lead.edge_owner_to_timeline_media.count <
+                              parseInt(filterPosts.min)
+                          )
+                            return false;
+                          if (
+                            typeof lead === "object" &&
+                            filterPosts.max &&
+                            lead.edge_owner_to_timeline_media &&
+                            lead.edge_owner_to_timeline_media.count >
+                              parseInt(filterPosts.max)
+                          )
+                            return false;
 
                           return true;
                         })
                         .map((lead, index) => {
-                          const username = typeof lead === "string" ? lead : lead.username;
+                          const username =
+                            typeof lead === "string" ? lead : lead.username;
                           const leadKey = username || `lead-${index}`;
                           return (
                             <div

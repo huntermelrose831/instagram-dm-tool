@@ -7,7 +7,12 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "format": "prettier --write \"src/**/*.{js,jsx}\"",
+    "analyze": "vite build --mode analyze"
   },
   "dependencies": {
     "apify-client": "^2.12.4",
