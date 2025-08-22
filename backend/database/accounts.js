@@ -74,6 +74,30 @@ class AccountsService {
     return null;
   }
 
+  // Get account by email
+  static getAccountByEmail(email) {
+    const stmt = db.prepare("SELECT * FROM instagram_accounts WHERE email = ?");
+    const account = stmt.get(email);
+    if (account) {
+      return {
+        ...account,
+        cookies: account.cookies ? JSON.parse(account.cookies) : null,
+        isActive: account.status === "active",
+      };
+    }
+    return null;
+  }
+
+  // Get account by username or email
+  static getAccountByUsernameOrEmail(identifier) {
+    // Try username first
+    let account = AccountsService.getAccountByUsername(identifier);
+    if (!account) {
+      account = AccountsService.getAccountByEmail(identifier);
+    }
+    return account;
+  }
+
   // Update account status
   static updateAccountStatus(username, isActive) {
     const stmt = db.prepare(`

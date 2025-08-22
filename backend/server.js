@@ -1,3 +1,4 @@
+require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
@@ -41,16 +42,18 @@ const {
 
 // Import ratelimits for counter resets
 const ratelimits = require("./database/ratelimits.js");
-
 // Import message monitoring system
 const { messageMonitor } = require("./messageMonitor");
-
-require("dotenv").config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 const VERSION = process.env.npm_package_version || "1.0.0";
-
+app.use((req, res, next) => {
+  console.log("→", req.method, req.path);
+  console.log("   Incoming X-API-KEY header:", req.get("x-api-key"));
+  console.log("   Loaded API_KEY env var:", process.env.API_KEYS_MUTATE);
+  next();
+});
 // Custom delay function using Promise
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -60,12 +63,35 @@ if (!fs.existsSync(logDir)) {
   fs.mkdirSync(logDir);
 }
 
-// Setup HTTP request logging
+// Setup HTTP request logging - only for file logging, reduce console noise
 const accessLogStream = fs.createWriteStream(path.join(logDir, "access.log"), {
   flags: "a",
 });
-app.use(morgan("combined", { stream: accessLogStream }));
-app.use(morgan("dev"));
+
+// Configure morgan for different environments
+if (process.env.NODE_ENV === "production") {
+  // In production: only log to file, no console logging
+  app.use(morgan("combined", { stream: accessLogStream }));
+} else {
+  // In development: log to both file and console, but skip certain endpoints
+  app.use(morgan("combined", { stream: accessLogStream }));
+  app.use(
+    morgan("dev", {
+      skip: (req, res) => {
+        // Skip logging for frequent polling endpoints in development
+        const skipPaths = [
+          "/api/exports/jobs",
+          "/api/reports",
+          "/api/reports/scheduled",
+        ];
+        return (
+          skipPaths.some((path) => req.originalUrl.includes(path)) &&
+          req.method === "GET"
+        );
+      },
+    })
+  );
+}
 
 // Security middleware
 app.use(
@@ -91,8 +117,11 @@ const apiLimiter = rateLimit({
   message: "Too many requests from this IP, please try again later.",
 });
 
-// Apply rate limiting to all API routes
-app.use("/api", apiLimiter);
+// Apply rate limiting to all API routes (skip high-frequency dm-progress polling)
+app.use("/api", (req, res, next) => {
+  if (req.path.startsWith("/dm-progress/")) return next();
+  return apiLimiter(req, res, next);
+});
 
 // Configure CORS properly for production
 app.use(
@@ -103,13 +132,13 @@ app.use(
         : "*",
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    allowedHeaders: ["Content-Type", "Authorization", "x-api-key"],
   })
 );
 
 // Body parser with size limits to prevent large payload attacks
 app.use(express.json({ limit: "1mb" }));
-
+app.use(express.urlencoded({ extended: false }));
 // Apply sanitization middleware
 app.use(sanitize);
 
@@ -140,75 +169,115 @@ app.get("/health", (req, res) => {
   }
 });
 
-app.post("/api/send-dms", validate("sendDM"), async (req, res, next) => {
-  try {
-    const {
-      username,
-      usernames,
-      message,
-      scheduled,
-      scheduleTime,
-      messageVariations,
-    } = req.body;
+app.post(
+  "/api/send-dms",
+  authApiKey("mutate"),
+  apiKeyRateLimit("mutate"),
+  validate("sendDM"),
+  async (req, res, next) => {
+    try {
+      const {
+        username,
+        usernames,
+        message,
+        scheduled,
+        scheduleTime,
+        messageVariations,
+      } = req.body;
 
-    logger.info(
-      `Processing DM request from ${username} to ${usernames.length} recipients`
-    );
+      // Accept either username or email for account lookup
+      const account = AccountsService.getAccountByUsernameOrEmail(username);
+      if (!account) {
+        return res.status(404).json({
+          status: "error",
+          message: "Account not found for provided username or email.",
+        });
+      }
+      const accountUsername = account.username;
 
-    // Handle scheduling
-    if (scheduled && scheduleTime) {
-      logger.info(`Scheduling DM for ${username} at ${scheduleTime}`);
+      logger.info(
+        `Processing DM request from ${accountUsername} to ${usernames.length} recipients`
+      );
 
-      // Use messageVariations if provided, otherwise use the single message
-      const variations =
-        messageVariations && messageVariations.length > 0
-          ? messageVariations
-          : [message];
+      // Enforce daily DM cap before proceeding (immediate sends only)
+      if (!scheduled) {
+        try {
+          const stats = await getDMStats(accountUsername);
+          const dailyCap = require("./config").dm.limits.dailyAccountCap;
+          const already =
+            stats.current_daily_count || stats.daily_dm_count || 0;
+          const requested = usernames.length;
+          if (already + requested > dailyCap) {
+            global.metrics &&
+              (global.metrics.dmDailyCapBlocks =
+                (global.metrics.dmDailyCapBlocks || 0) + 1);
+            return res.status(429).json({
+              status: "error",
+              message: `Daily DM cap exceeded: ${already} sent, ${requested} requested, cap ${dailyCap}. Remaining: ${Math.max(dailyCap - already, 0)}`,
+            });
+          }
+        } catch (capErr) {
+          logger.warn(
+            `Daily cap pre-check failed for ${accountUsername}: ${capErr.message}`
+          );
+        }
+      }
 
-      try {
-        const jobId = await scheduleDM({
-          fromUsername: username,
-          targetUsernames: usernames,
-          messageVariations: variations,
-          scheduleTime: scheduleTime,
-          isRecurring: false,
-          recurringInterval: null,
+      // Handle scheduling
+      if (scheduled && scheduleTime) {
+        logger.info(`Scheduling DM for ${accountUsername} at ${scheduleTime}`);
+
+        // Use messageVariations if provided, otherwise use the single message
+        const variations =
+          messageVariations && messageVariations.length > 0
+            ? messageVariations
+            : [message];
+
+        try {
+          const jobId = await scheduleDM({
+            fromUsername: accountUsername,
+            targetUsernames: usernames,
+            messageVariations: variations,
+            scheduleTime: scheduleTime,
+            isRecurring: false,
+            recurringInterval: null,
+          });
+
+          return res.json({
+            status: "success",
+            message: "DM scheduled successfully",
+            jobId,
+            scheduledFor: scheduleTime,
+          });
+        } catch (scheduleError) {
+          logger.error(
+            `Failed to schedule DM for ${accountUsername}: ${scheduleError.message}`
+          );
+          return next(scheduleError);
+        }
+      } else {
+        // Send immediately
+        logger.info(
+          `Sending immediate DM from ${accountUsername} to ${usernames.length} recipients`
+        );
+
+        await sendDMs({
+          igUsername: accountUsername,
+          usernames,
+          message,
         });
 
         return res.json({
           status: "success",
-          message: "DM scheduled successfully",
-          jobId,
-          scheduledFor: scheduleTime,
+          message: "Messages sent successfully",
         });
-      } catch (scheduleError) {
-        logger.error(
-          `Failed to schedule DM for ${username}: ${scheduleError.message}`
-        );
-        return next(scheduleError);
       }
-    } else {
-      // Send immediately
-      logger.info(
-        `Sending immediate DM from ${username} to ${usernames.length} recipients`
-      );
-
-      await sendDMs({
-        igUsername: username,
-        usernames,
-        message,
-      });
-
-      return res.json({
-        status: "success",
-        message: "Messages sent successfully",
-      });
+    } catch (err) {
+      logger.error(`DM sending error: ${err.message}`);
+      next(err);
     }
-  } catch (err) {
-    logger.error(`DM sending error: ${err.message}`);
-    next(err);
   }
-});
+);
 
 // Import account service for Puppeteer-based account management
 const { addAccount } = require("./services/accountService");
@@ -238,7 +307,12 @@ app.post("/api/add-account", validate("login"), async (req, res, next) => {
 
 app.get("/api/accounts", async (req, res) => {
   try {
-    const accounts = AccountsService.getAccounts();
+    let accounts = AccountsService.getAccounts();
+    // Ensure every account has a valid email field
+    accounts = accounts.map((acc) => ({
+      ...acc,
+      email: acc.email || acc.username, // Use username if email is null
+    }));
     res.json(accounts);
   } catch (error) {
     console.error("Error fetching accounts:", error);
@@ -319,22 +393,43 @@ app.post("/api/accounts/login", async (req, res) => {
 
 app.put("/api/accounts/:username", async (req, res) => {
   try {
-    const { username } = req.params;
+    const { username: originalUsername } = req.params;
     const updates = req.body;
 
-    const accountData = {
-      username,
-      email: updates.email,
-      passwordHash: updates.password,
-      proxyId: updates.proxy ? parseInt(updates.proxy) : null,
-      isActive: updates.isActive !== undefined ? updates.isActive : true,
+    // Find the original account
+    const account =
+      AccountsService.getAccountByUsernameOrEmail(originalUsername);
+    if (!account) {
+      return res
+        .status(404)
+        .json({ status: "error", message: "Account not found" });
+    }
+
+    // Prepare updated account data, allowing username change
+    const updatedAccountData = {
+      ...account,
+      username: updates.username || account.username,
+      email: updates.email !== undefined ? updates.email : account.email,
+      passwordHash:
+        updates.password !== undefined
+          ? updates.password
+          : account.passwordHash,
+      proxyId: updates.proxy ? parseInt(updates.proxy) : account.proxyId,
+      isActive:
+        updates.isActive !== undefined ? updates.isActive : account.isActive,
     };
 
-    const account = AccountsService.upsertAccount(accountData);
+    // Remove the old account if username is changing
+    if (updatedAccountData.username !== account.username) {
+      AccountsService.deleteAccount(account.username);
+    }
+
+    // Upsert the updated account
+    const updatedAccount = AccountsService.upsertAccount(updatedAccountData);
     res.json({
       status: "success",
       message: "Account updated successfully",
-      account,
+      account: updatedAccount,
     });
   } catch (error) {
     console.error("Error updating account:", error);
@@ -737,70 +832,95 @@ app.delete("/api/targets/:username", async (req, res) => {
 });
 
 // Endpoint to schedule DMs
-app.post("/api/schedule-dms", async (req, res) => {
-  try {
-    console.log("\n=== Scheduling new DM job ===");
-    console.log("Received request at:", new Date().toISOString());
-    console.log("Request body:", JSON.stringify(req.body, null, 2));
+app.post(
+  "/api/schedule-dms",
+  authApiKey("mutate"),
+  apiKeyRateLimit("mutate"),
+  async (req, res) => {
+    try {
+      console.log("\n=== Scheduling new DM job ===");
+      console.log("Received request at:", new Date().toISOString());
+      console.log("Request body:", JSON.stringify(req.body, null, 2));
 
-    const {
-      fromUsername,
-      targetUsernames,
-      messageVariations,
-      scheduleTime,
-      isRecurring,
-      recurringInterval,
-    } = req.body;
+      const {
+        fromUsername,
+        targetUsernames,
+        messageVariations,
+        scheduleTime,
+        isRecurring,
+        recurringInterval,
+      } = req.body;
 
-    // Validate required fields
-    if (
-      !fromUsername ||
-      !targetUsernames ||
-      !messageVariations ||
-      !scheduleTime
-    ) {
-      return res.status(400).json({
-        status: "error",
-        message: "Missing required fields",
-        details: {
-          fromUsername,
-          targetUsernames,
-          messageVariations,
-          scheduleTime,
-        },
+      // Basic validation
+      if (
+        !fromUsername ||
+        !Array.isArray(targetUsernames) ||
+        !targetUsernames.length ||
+        !Array.isArray(messageVariations) ||
+        !messageVariations.length ||
+        !scheduleTime
+      ) {
+        return res.status(400).json({
+          status: "error",
+          message:
+            "fromUsername, targetUsernames[], messageVariations[] and scheduleTime are required",
+        });
+      }
+
+      const cleanFromUsername = fromUsername.replace(/^@/, "");
+
+      // Daily cap pre-check (approximate, does not account for already scheduled counts yet)
+      try {
+        const stats = await getDMStats(cleanFromUsername);
+        const dailyCap = require("./config").dm.limits.dailyAccountCap;
+        const already = stats.current_daily_count || stats.daily_dm_count || 0;
+        const requested = targetUsernames.length;
+        if (already + requested > dailyCap) {
+          if (global.metrics) {
+            global.metrics.dmDailyCapBlocks =
+              (global.metrics.dmDailyCapBlocks || 0) + 1;
+          }
+          return res.status(429).json({
+            status: "error",
+            message: `Daily DM cap exceeded for schedule: ${already} sent, ${requested} requested, cap ${dailyCap}. Remaining: ${Math.max(dailyCap - already, 0)}`,
+          });
+        }
+      } catch (capErr) {
+        logger.warn(
+          `Schedule daily cap pre-check failed for ${fromUsername}: ${capErr.message}`
+        );
+      }
+
+      console.log("TIMEZONE DEBUG - Scheduling with cleaned username:", {
+        original: fromUsername,
+        cleaned: cleanFromUsername,
+        scheduleTime,
+        targetCount: targetUsernames.length,
       });
-    } // Clean the username to remove @ prefix if present
-    const cleanFromUsername = fromUsername.replace(/^@/, "");
 
-    console.log("TIMEZONE DEBUG - Scheduling with cleaned username:", {
-      original: fromUsername,
-      cleaned: cleanFromUsername,
-      scheduleTime,
-      targetCount: targetUsernames.length,
-    });
+      const jobId = await scheduleDM({
+        fromUsername: cleanFromUsername,
+        targetUsernames,
+        messageVariations,
+        scheduleTime,
+        isRecurring,
+        recurringInterval,
+      });
 
-    const jobId = await scheduleDM({
-      fromUsername: cleanFromUsername,
-      targetUsernames,
-      messageVariations,
-      scheduleTime,
-      isRecurring,
-      recurringInterval,
-    });
-
-    res.json({
-      status: "success",
-      message: "DM scheduled successfully",
-      jobId,
-    });
-  } catch (err) {
-    console.error("Error scheduling DMs:", err);
-    res.status(500).json({
-      status: "error",
-      message: err.message || "Failed to schedule DMs",
-    });
+      res.json({
+        status: "success",
+        message: "DM scheduled successfully",
+        jobId,
+      });
+    } catch (err) {
+      console.error("Error scheduling DMs:", err);
+      res.status(500).json({
+        status: "error",
+        message: err.message || "Failed to schedule DMs",
+      });
+    }
   }
-});
+);
 
 // Endpoint to get DM stats and rate limits
 app.get("/api/dm-stats/:username", async (req, res) => {
@@ -921,11 +1041,16 @@ app.post("/api/crm/contacts/:id/notes", async (req, res) => {
   }
 });
 
-app.patch("/api/crm/contacts/:id", async (req, res) => {
+// Re-added contact status update routes (PATCH & PUT)
+console.log("Registering CRM contact status update routes");
+function contactStatusValidation(status) {
+  const validStatuses = ["lead", "prospect", "customer", "inactive"];
+  return validStatuses.includes(status);
+}
+async function updateContactStatusHandler(req, res) {
   try {
     const { id } = req.params;
     const { status } = req.body;
-
     if (!id) {
       return res
         .status(400)
@@ -936,64 +1061,66 @@ app.patch("/api/crm/contacts/:id", async (req, res) => {
         .status(400)
         .json({ status: "error", message: "Status is required" });
     }
-
-    const updatedContact = await updateContactStatus(id, status);
-    if (!updatedContact) {
+    if (!contactStatusValidation(status)) {
+      return res
+        .status(400)
+        .json({ status: "error", message: "Invalid status value" });
+    }
+    const updated = await updateContactStatus(id, status);
+    if (!updated) {
       return res
         .status(404)
         .json({ status: "error", message: "Contact not found" });
     }
-
-    res.json({ status: "success", contact: updatedContact });
+    res.json({ status: "success", contact: updated });
   } catch (error) {
     console.error("Error updating contact status:", error);
-    res
-      .status(error.message.includes("Invalid status") ? 400 : 500)
-      .json({ status: "error", message: error.message });
+    res.status(500).json({ status: "error", message: error.message });
   }
-});
+}
+app.patch("/api/crm/contacts/:id", updateContactStatusHandler);
+app.put("/api/crm/contacts/:id", updateContactStatusHandler);
 
-app.post("/api/crm/contacts/:id/tags", async (req, res) => {
+// Delete contact by numeric ID
+app.delete("/api/crm/contacts/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const { tag } = req.body;
-    await addTag(id, tag);
-    res.json({ status: "success" });
+    const { deleteContact } = require("./database/crm");
+    const result = deleteContact(id);
+    if (!result.deleted) {
+      return res
+        .status(404)
+        .json({ status: "error", message: "Contact not found" });
+    }
+    res.json({
+      status: "success",
+      message: "Contact deleted",
+      contact: result.contact,
+    });
   } catch (error) {
+    console.error("Error deleting contact:", error);
     res.status(500).json({ status: "error", message: error.message });
   }
 });
 
-app.delete("/api/crm/contacts/:id/tags/:tag", async (req, res) => {
+// Delete contact by username
+app.delete("/api/crm/contacts/username/:username", async (req, res) => {
   try {
-    const { id, tag } = req.params;
-    await removeTag(id, tag);
-    res.json({ status: "success" });
-  } catch (error) {
-    res.status(500).json({ status: "error", message: error.message });
-  }
-});
-
-app.post("/api/crm/contacts/:id/interactions", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { type, content, campaignId } = req.body;
-
-    if (!id) {
+    const { username } = req.params;
+    const { deleteContactByUsername } = require("./database/crm");
+    const result = deleteContactByUsername(username);
+    if (!result.deleted) {
       return res
-        .status(400)
-        .json({ status: "error", message: "Contact ID is required" });
+        .status(404)
+        .json({ status: "error", message: "Contact not found" });
     }
-    if (!type || !content) {
-      return res
-        .status(400)
-        .json({ status: "error", message: "Type and content are required" });
-    }
-
-    await recordInteraction(id, type, content, campaignId);
-    res.json({ status: "success" });
+    res.json({
+      status: "success",
+      message: "Contact deleted",
+      contact: result.contact,
+    });
   } catch (error) {
-    console.error("Error recording interaction:", error);
+    console.error("Error deleting contact by username:", error);
     res.status(500).json({ status: "error", message: error.message });
   }
 });
@@ -1020,8 +1147,12 @@ app.get("/api/account-safety/accounts", async (req, res) => {
             : account.riskLevel === "medium"
               ? "warning"
               : "healthy",
-        dmsToday: rateLimit?.messages_sent_today || 0,
-        dailyDmLimit: rateLimit?.daily_limit || 50,
+        dmsToday:
+          rateLimit && rateLimit.messages_sent_today
+            ? rateLimit.messages_sent_today
+            : 0,
+        dailyDmLimit:
+          rateLimit && rateLimit.daily_limit ? rateLimit.daily_limit : 50,
         followsToday: 0, // Would need separate tracking
         dailyFollowLimit: 50,
         lastActive: account.updated_at,
@@ -1288,6 +1419,296 @@ app.get("/api/account-safety/health-check/:accountId", async (req, res) => {
   }
 });
 
+// ================== REPORTING & EXPORT API ENDPOINTS ==================
+
+const { ReportsService } = require("./database");
+
+// List reports
+app.get("/api/reports", (req, res) => {
+  try {
+    const reports = ReportsService.listReports();
+    const enriched = reports.map((r) => ({
+      ...r,
+      latest: ReportsService.latestResult(r.id),
+    }));
+    res.json({ reports: enriched });
+  } catch (e) {
+    console.error("Error listing reports", e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Scheduled reports
+app.get("/api/reports/scheduled", (req, res) => {
+  try {
+    const scheduledReports = ReportsService.listReports().filter(
+      (r) => r.schedule_frequency !== "manual"
+    );
+    res.json({ scheduledReports });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Create report
+app.post("/api/reports/create", (req, res) => {
+  try {
+    const report = ReportsService.createReport(req.body);
+    res.json({ report });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// Get report detail
+app.get("/api/reports/:id", (req, res) => {
+  const report = ReportsService.getReport(req.params.id);
+  if (!report) return res.status(404).json({ error: "Not found" });
+  res.json({ report, latest: ReportsService.latestResult(report.id) });
+});
+
+// Update report
+app.patch("/api/reports/:id", (req, res) => {
+  const updated = ReportsService.updateReport(req.params.id, req.body);
+  if (!updated) return res.status(404).json({ error: "Not found" });
+  res.json({ report: updated });
+});
+
+// Delete report
+app.delete("/api/reports/:id", (req, res) => {
+  const existing = ReportsService.getReport(req.params.id);
+  if (!existing) return res.status(404).json({ error: "Not found" });
+  ReportsService.deleteReport(req.params.id);
+  res.json({ deleted: true });
+});
+
+// Run report now
+app.post("/api/reports/:id/run", (req, res) => {
+  const report = ReportsService.getReport(req.params.id);
+  if (!report) return res.status(404).json({ error: "Not found" });
+  const data = ReportsService.computeMetrics(report);
+  const saved = ReportsService.saveReportResult(report.id, data);
+  res.json({ result: saved });
+});
+
+// Export report (CSV or JSON)
+app.post("/api/reports/:id/export", (req, res) => {
+  const report = ReportsService.getReport(req.params.id);
+  if (!report) return res.status(404).json({ error: "Not found" });
+  let latest = ReportsService.latestResult(report.id);
+  if (!latest) {
+    const data = ReportsService.computeMetrics(report);
+    latest = ReportsService.saveReportResult(report.id, data);
+  }
+  const format = (req.body.format || report.format || "csv").toLowerCase();
+  const filename = `report-${report.id}-${Date.now()}.${format === "excel" ? "csv" : format}`;
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}`);
+  if (format === "json") {
+    res.setHeader("Content-Type", "application/json");
+    return res.send(JSON.stringify(latest, null, 2));
+  }
+  // CSV
+  const metrics = latest.data.metrics || {};
+  const csv =
+    "metric,value\n" +
+    Object.entries(metrics)
+      .map(([k, v]) => `${k},${v}`)
+      .join("\n");
+  res.setHeader("Content-Type", "text/csv");
+  res.send(csv);
+});
+
+// Export jobs
+app.get("/api/exports/jobs", (req, res) => {
+  try {
+    const jobs = ReportsService.listExportJobs();
+    res.json({ jobs });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post("/api/exports/start", (req, res) => {
+  try {
+    const job = ReportsService.createExportJob(req.body);
+    setTimeout(() => processExport(job.id), 200);
+    res.json({ job });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.get("/api/exports/jobs/:id/download", (req, res) => {
+  const job = ReportsService.getExportJob(req.params.id);
+  if (!job || job.status !== "completed" || !job.file_path) {
+    return res.status(404).json({ error: "Not ready" });
+  }
+  res.download(job.file_path, (err) => {
+    if (err) console.error("Download error", err);
+  });
+});
+
+function processExport(id) {
+  const job = ReportsService.getExportJob(id);
+  if (!job || job.status !== "queued") return;
+  ReportsService.markExportStarted(id);
+  let progress = 0;
+  const interval = setInterval(() => {
+    progress += 25;
+    if (progress >= 100) {
+      const filePath = path.join(__dirname, "exports", `export-${id}.csv`);
+      try {
+        const dummy =
+          "id,value\n" +
+          Array.from({ length: 10 })
+            .map((_, i) => `${i + 1},data${i + 1}`)
+            .join("\n");
+        fs.writeFileSync(filePath, dummy);
+      } catch (e) {
+        ReportsService.failExport(id, e.message);
+        clearInterval(interval);
+        return;
+      }
+      ReportsService.completeExport(id, filePath, 10);
+      clearInterval(interval);
+    } else {
+      ReportsService.updateExportProgress(id, progress);
+    }
+  }, 400);
+}
+
+// Simple scheduler for due reports
+setInterval(() => {
+  try {
+    const due = ReportsService.listScheduledDue();
+    due.forEach((r) => {
+      const data = ReportsService.computeMetrics(r);
+      ReportsService.saveReportResult(r.id, data);
+    });
+  } catch (e) {
+    console.error("Scheduled report run error", e);
+  }
+}, 60_000);
+
+// === DM PROGRESS STREAM ENDPOINTS (must be before notFound) ===
+// In-memory session store
+const dmProgressSessions = new Map();
+// Strict post limiter for DM progress endpoints
+const strictPostLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+app.use("/api/send-dms-progress", strictPostLimiter);
+app.use("/api/schedule-dms", strictPostLimiter);
+
+app.post(
+  "/api/send-dms-progress",
+  authApiKey("mutate"),
+  apiKeyRateLimit("mutate"),
+  validate("sendDM"),
+  async (req, res) => {
+    // Daily cap pre-check for progress-based sending
+    try {
+      const { email, usernames } = req.body;
+      const { AccountsService } = require("./database");
+      const account = AccountsService.getAccountByEmail(email);
+      if (!account) {
+        return res.status(404).json({
+          status: "error",
+          message: "Account not found for provided email.",
+        });
+      }
+      const stats = await getDMStats(account.email);
+      const dailyCap = require("./config").dm.limits.dailyAccountCap;
+      const already = stats.current_daily_count || stats.daily_dm_count || 0;
+      const requested = Array.isArray(usernames) ? usernames.length : 0;
+      if (already + requested > dailyCap) {
+        if (global.metrics) {
+          global.metrics.dmDailyCapBlocks =
+            (global.metrics.dmDailyCapBlocks || 0) + 1;
+        }
+        return res.status(429).json({
+          status: "error",
+          message: `Daily DM cap exceeded: ${already} sent, ${requested} requested, cap ${dailyCap}. Remaining: ${Math.max(dailyCap - already, 0)}`,
+        });
+      }
+    } catch (e) {
+      logger.warn(`Progress send daily cap check failed: ${e.message}`);
+    }
+    try {
+      // Only accept email for account lookup
+      const {
+        email,
+        usernames,
+        message,
+        messageVariations,
+        scheduled,
+        scheduleTime,
+      } = req.body;
+      const { AccountsService } = require("./database");
+      const account = AccountsService.getAccountByEmail(email);
+      if (!account) {
+        return res.status(404).json({
+          status: "error",
+          message: "Account not found for provided email.",
+        });
+      }
+      const accountEmail = account.email;
+      const sessionId = createProgressSession();
+      if (!acquireAccountLock(accountEmail)) {
+        pushProgress(sessionId, {
+          stage: "error",
+          message: "Another send in progress for this account",
+          percent: 100,
+          time: new Date().toISOString(),
+        });
+        return res.status(400).json({
+          status: "error",
+          message: "Another send in progress for this account",
+        });
+      }
+      if (global.metrics)
+        global.metrics.dmStarts = (global.metrics.dmStarts || 0) + 1;
+      // Try to start DM sending, catch validation/account errors early
+      try {
+        await sendDMs({
+          igEmail: accountEmail,
+          usernames,
+          message,
+          messageVariations,
+          scheduled,
+          scheduleTime,
+          onProgress: (evt) => pushProgress(sessionId, evt),
+        });
+        if (global.metrics)
+          global.metrics.dmSuccess = (global.metrics.dmSuccess || 0) + 1;
+        res.json({ status: "started", sessionId });
+      } catch (err) {
+        if (global.metrics)
+          global.metrics.dmErrors = (global.metrics.dmErrors || 0) + 1;
+        pushProgress(sessionId, {
+          stage: "error",
+          message: err.message,
+          percent: 100,
+          time: new Date().toISOString(),
+        });
+        releaseAccountLock(accountEmail);
+        return res.status(400).json({ status: "error", message: err.message });
+      }
+      releaseAccountLock(accountEmail);
+    } catch (err) {
+      return res.status(500).json({ status: "error", message: err.message });
+    }
+  }
+);
+// === END DM PROGRESS STREAM ENDPOINTS ===
+
+// Clean up old progress sessions on server start
+dmProgressSessions.clear();
+
 // Apply error handling middleware - must be after all routes
 app.use(notFound);
 app.use(errorHandler);
@@ -1319,7 +1740,6 @@ async function gracefulShutdown() {
   }
 
   logger.info("Shutdown complete, exiting process");
-  process.exit(0);
 }
 
 // Start the server
@@ -1354,6 +1774,103 @@ app.listen(PORT, () => {
     24 * 60 * 60 * 1000
   ); // Every day
 });
+
+// Update metrics object to include keyRateLimited and new counters
+let metrics = {
+  requests: 0,
+  dmStarts: 0,
+  dmErrors: 0,
+  keyRateLimited: 0,
+  dmDailyCapBlocks: 0,
+  dmSuccess: 0,
+};
+app.use((req, res, next) => {
+  metrics.requests++;
+  next();
+});
+app.get(
+  "/api/health",
+  authApiKey("read"),
+  apiKeyRateLimit("read"),
+  (req, res) => {
+    res.json({ status: "ok", time: Date.now() });
+  }
+);
+app.get(
+  "/api/metrics",
+  authApiKey("read"),
+  apiKeyRateLimit("read"),
+  (req, res) => {
+    res.type("text/plain").send(
+      Object.entries(metrics)
+        .map(([k, v]) => `${k} ${v}`)
+        .join("\n")
+    );
+  }
+);
+
+global.metrics = metrics;
+
+const config = require("./config");
+
+// API Key auth middleware
+function authApiKey(requiredScope) {
+  return (req, res, next) => {
+    const key = req.headers["x-api-key"];
+    if (!key) return res.status(401).json({ error: "API key required" });
+    const { apiKeys } = config;
+    const isRead = apiKeys.read.has(key);
+    const isMutate = apiKeys.mutate.has(key);
+    req.apiKeyScope = isMutate ? "mutate" : isRead ? "read" : undefined;
+    if (requiredScope === "read" && (isRead || isMutate)) return next();
+    if (requiredScope === "mutate" && isMutate) return next();
+    return res.status(403).json({ error: "Forbidden" });
+  };
+}
+
+// Per-API-key rate limiter
+const KEY_LIMITS = {
+  read: { windowMs: 15 * 60 * 1000, max: 500 },
+  mutate: { windowMs: 15 * 60 * 1000, max: 120 },
+};
+const keyRateState = { read: new Map(), mutate: new Map() }; // scope -> Map(key -> {count, reset})
+function apiKeyRateLimit(scope) {
+  return (req, res, next) => {
+    const key = req.headers["x-api-key"];
+    if (!key) return res.status(401).json({ error: "API key required" });
+    const limits = KEY_LIMITS[scope];
+    const now = Date.now();
+    let entry = keyRateState[scope].get(key);
+    if (!entry || now > entry.reset) {
+      entry = { count: 0, reset: now + limits.windowMs };
+      keyRateState[scope].set(key, entry);
+    }
+    if (entry.count >= limits.max) {
+      metrics.keyRateLimited++;
+      const retryAfter = Math.ceil((entry.reset - now) / 1000);
+      res.setHeader("Retry-After", retryAfter);
+      return res
+        .status(429)
+        .json({ error: "API key rate limit exceeded", scope, retryAfter });
+    }
+    entry.count++;
+    res.setHeader("X-RateLimit-Limit", limits.max);
+    res.setHeader(
+      "X-RateLimit-Remaining",
+      Math.max(limits.max - entry.count, 0)
+    );
+    res.setHeader("X-RateLimit-Reset", Math.floor(entry.reset / 1000));
+    next();
+  };
+}
+setInterval(() => {
+  const now = Date.now();
+  ["read", "mutate"].forEach((scope) => {
+    for (const [k, v] of keyRateState[scope].entries()) {
+      if (now > v.reset) keyRateState[scope].delete(k);
+    }
+  });
+}, 60 * 1000);
 
 // Advanced Targeting & Scraping Routes - Updated to use database services
 app.get("/api/targeting/scraping-jobs", async (req, res) => {
@@ -1471,7 +1988,7 @@ app.get("/api/targeting/leads/export", async (req, res) => {
     const csvData = `Username,Full Name,Followers,Following,Posts,Engagement Rate,Location,Tags
 fitness_guru_23,Sarah Johnson,12500,850,324,4.2,"Los Angeles, CA",fitness;lifestyle
 tech_entrepreneur,Mike Chen,8900,1200,156,6.1,"San Francisco, CA",tech;startup
-lifestyle_blogger,Emma Rodriguez,25600,450,892,3.8,"Miami, FL",lifestyle;travel`;
+lifestyle_blogger,Emma Rodriguez,25600,450,892,3.8,"Miami, FL",lifestyle`;
 
     res.setHeader("Content-Type", "text/csv");
     res.setHeader("Content-Disposition", "attachment; filename=leads.csv");
@@ -1514,675 +2031,31 @@ app.post("/api/targeting/scrape-competitor-followers", async (req, res) => {
   }
 });
 
-// ================== REPORTING & EXPORT API ENDPOINTS ==================
+// Clean shutdown handling
+process.on("SIGTERM", gracefulShutdown);
+process.on("SIGINT", gracefulShutdown);
 
-// Get all reports
-app.get("/api/reports", async (req, res) => {
+async function gracefulShutdown() {
+  logger.info("Received shutdown signal, closing connections gracefully...");
+
+  // Stop all message monitoring
   try {
-    const reports = [
-      {
-        id: 1,
-        name: "Weekly Performance Summary",
-        type: "scheduled",
-        lastGenerated: new Date().toISOString(),
-        status: "active",
-        format: "pdf",
-        metrics: ["messages_sent", "responses_received", "leads_generated"],
-      },
-      {
-        id: 2,
-        name: "Campaign ROI Analysis",
-        type: "custom",
-        lastGenerated: new Date().toISOString(),
-        status: "completed",
-        format: "excel",
-      },
-    ];
-
-    const customReports = [
-      {
-        id: 3,
-        name: "Lead Quality Assessment",
-        type: "automated",
-        lastGenerated: new Date().toISOString(),
-        status: "active",
-        format: "csv",
-      },
-    ];
-
-    res.json({ reports, customReports });
-  } catch (error) {
-    console.error("Error fetching reports:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get scheduled reports
-app.get("/api/reports/scheduled", async (req, res) => {
-  try {
-    const scheduledReports = [
-      {
-        id: 1,
-        name: "Daily Summary",
-        frequency: "daily",
-        time: "09:00",
-        recipients: ["manager@company.com"],
-        nextRun: new Date(Date.now() + 86400000).toISOString(),
-        status: "active",
-      },
-      {
-        id: 2,
-        name: "Weekly DM Summary",
-        frequency: "weekly",
-        time: "08:00",
-        recipients: ["team@company.com"],
-        nextRun: new Date(Date.now() + 604800000).toISOString(),
-        status: "active",
-      },
-    ];
-
-    res.json({ scheduledReports });
-  } catch (error) {
-    console.error("Error fetching scheduled reports:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Create new report
-app.post("/api/reports/create", async (req, res) => {
-  try {
-    const { name, type, metrics, dateRange, format, schedule } = req.body;
-
-    // Validate required fields
-    if (!name || !metrics || metrics.length === 0) {
-      return res.status(400).json({
-        error: "Report name and at least one metric are required",
-      });
+    if (messageMonitor) {
+      await messageMonitor.stopAllMonitoring();
+      logger.info("All message monitors stopped");
     }
-
-    const newReport = {
-      id: Date.now(),
-      name,
-      type: type || "custom",
-      metrics,
-      dateRange: dateRange || "last_30_days",
-      format: format || "pdf",
-      schedule: schedule || { frequency: "manual" },
-      createdAt: new Date().toISOString(),
-      status: "active",
-    };
-
-    // In a real application, save to database
-    console.log("Created new report:", newReport);
-
-    res.json({
-      message: "Report created successfully",
-      report: newReport,
-    });
-  } catch (error) {
-    console.error("Error creating report:", error);
-    res.status(500).json({ error: error.message });
+  } catch (err) {
+    logger.error("Error stopping message monitors:", err);
   }
-});
 
-// Export report
-app.post("/api/reports/:id/export", async (req, res) => {
+  // Close database connection
   try {
-    const { id } = req.params;
-    const { format } = req.body;
-
-    // Simulate report generation
-    await delay(2000);
-
-    // In a real application, generate actual report file
-    const reportData = {
-      reportId: id,
-      format: format || "pdf",
-      generatedAt: new Date().toISOString(),
-      data: {
-        messagesSent: 1547,
-        responsesReceived: 423,
-        leadsGenerated: 89,
-        conversionRate: 21.04,
-      },
-    };
-
-    // Set appropriate headers for file download
-    res.setHeader("Content-Type", "application/octet-stream");
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="report-${id}.${format}"`
-    );
-
-    // Send mock file content
-    res.send(JSON.stringify(reportData, null, 2));
-  } catch (error) {
-    console.error("Error exporting report:", error);
-    res.status(500).json({ error: error.message });
+    const db = require("./database/db");
+    db.close();
+    logger.info("Database connection closed");
+  } catch (err) {
+    logger.error("Error closing database connection:", err);
   }
-});
 
-// Get export jobs
-app.get("/api/exports/jobs", async (req, res) => {
-  try {
-    const jobs = [
-      {
-        id: 1,
-        name: "All Leads Export",
-        type: "leads",
-        status: "completed",
-        progress: 100,
-        createdAt: new Date(Date.now() - 7200000).toISOString(),
-        completedAt: new Date(Date.now() - 7080000).toISOString(),
-        recordCount: 1547,
-        fileSize: "2.3 MB",
-        downloadUrl: "/downloads/leads-export-123.csv",
-      },
-      {
-        id: 2,
-        name: "Lead Data Export",
-        type: "leads",
-        status: "processing",
-        progress: 67,
-        createdAt: new Date(Date.now() - 900000).toISOString(),
-        estimatedCompletion: new Date(Date.now() + 300000).toISOString(),
-        recordCount: 890,
-      },
-    ];
-
-    res.json({ jobs });
-  } catch (error) {
-    console.error("Error fetching export jobs:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Start data export
-app.post("/api/exports/start", async (req, res) => {
-  try {
-    const { type, filters, format } = req.body;
-
-    if (!type) {
-      return res.status(400).json({ error: "Export type is required" });
-    }
-
-    const exportJob = {
-      id: Date.now(),
-      name: `${type.charAt(0).toUpperCase() + type.slice(1)} Export`,
-      type,
-      status: "queued",
-      progress: 0,
-      createdAt: new Date().toISOString(),
-      estimatedStart: new Date(Date.now() + 30000).toISOString(),
-      filters: filters || {},
-      format: format || "csv",
-    };
-
-    // In a real application, start background export process
-    console.log("Started export job:", exportJob);
-
-    res.json({
-      message: "Export job started",
-      job: exportJob,
-    });
-  } catch (error) {
-    console.error("Error starting export:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ================== TEAM COLLABORATION API ENDPOINTS ==================
-
-// Get team members
-app.get("/api/team/members", async (req, res) => {
-  try {
-    const members = [
-      {
-        id: 1,
-        name: "John Smith",
-        email: "john@company.com",
-        role: "admin",
-        status: "active",
-        lastActive: new Date(Date.now() - 1800000).toISOString(),
-        joinedAt: "2024-01-15",
-        workspaces: ["main", "campaign-team"],
-        avatar: null,
-      },
-      {
-        id: 2,
-        name: "Sarah Johnson",
-        email: "sarah@company.com",
-        role: "manager",
-        status: "active",
-        lastActive: new Date(Date.now() - 5400000).toISOString(),
-        joinedAt: "2024-03-10",
-        workspaces: ["main"],
-        avatar: null,
-      },
-      {
-        id: 3,
-        name: "Mike Wilson",
-        email: "mike@company.com",
-        role: "member",
-        status: "invited",
-        lastActive: null,
-        joinedAt: new Date().toISOString(),
-        workspaces: ["campaign-team"],
-        avatar: null,
-      },
-    ];
-
-    res.json({ members });
-  } catch (error) {
-    console.error("Error fetching team members:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get roles and permissions
-app.get("/api/team/roles", async (req, res) => {
-  try {
-    const roles = [
-      {
-        id: "admin",
-        name: "Administrator",
-        description: "Full access to all features and settings",
-        permissions: [
-          "view_dashboard",
-          "send_messages",
-          "export_data",
-          "manage_leads",
-          "manage_accounts",
-          "team_admin",
-          "billing_access",
-          "api_access",
-        ],
-        color: "#EF4444",
-        memberCount: 1,
-      },
-      {
-        id: "manager",
-        name: "Manager",
-        description: "Can manage leads and export data",
-        permissions: [
-          "view_dashboard",
-          "send_messages",
-          "export_data",
-          "manage_leads",
-        ],
-        color: "#F59E0B",
-        memberCount: 1,
-      },
-      {
-        id: "member",
-        name: "Team Member",
-        description: "Basic access to messaging and lead management",
-        permissions: ["view_dashboard", "send_messages", "manage_leads"],
-        color: "#3B82F6",
-        memberCount: 3,
-      },
-    ];
-
-    res.json({ roles });
-  } catch (error) {
-    console.error("Error fetching roles:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get shared templates
-app.get("/api/team/templates", async (req, res) => {
-  try {
-    const templates = [
-      {
-        id: 1,
-        name: "Cold Outreach Template",
-        type: "message",
-        createdBy: "John Smith",
-        createdAt: "2024-12-15",
-        usage: 45,
-        shared: true,
-        workspaces: ["main", "campaign-team"],
-        content: "Hey {name}, I noticed you're into {interest}...",
-      },
-      {
-        id: 2,
-        name: "Follow-up Sequence",
-        type: "workflow",
-        createdBy: "Sarah Johnson",
-        createdAt: "2024-12-18",
-        usage: 23,
-        shared: true,
-        workspaces: ["main"],
-        steps: 3,
-      },
-      {
-        id: 3,
-        name: "Lead Qualification Flow",
-        type: "workflow",
-        createdBy: "Mike Wilson",
-        createdAt: "2024-12-19",
-        usage: 12,
-        shared: false,
-        workspaces: ["campaign-team"],
-      },
-    ];
-
-    res.json({ templates });
-  } catch (error) {
-    console.error("Error fetching shared templates:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get workspaces
-app.get("/api/team/workspaces", async (req, res) => {
-  try {
-    const workspaces = [
-      {
-        id: "main",
-        name: "Main Workspace",
-        description: "Primary workspace for all team activities",
-        memberCount: 3,
-        createdAt: "2024-01-15",
-        settings: {
-          privacy: "team_only",
-          defaultRole: "member",
-        },
-      },
-      {
-        id: "campaign-team",
-        name: "Campaign Team",
-        description: "Dedicated workspace for campaign management",
-        memberCount: 2,
-        createdAt: "2024-03-20",
-        settings: {
-          privacy: "private",
-          defaultRole: "member",
-        },
-      },
-    ];
-
-    res.json({ workspaces });
-  } catch (error) {
-    console.error("Error fetching workspaces:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get team activity log
-app.get("/api/team/activity", async (req, res) => {
-  try {
-    const activities = [
-      {
-        id: 1,
-        user: "John Smith",
-        action: "invited new member",
-        target: "mike@company.com",
-        timestamp: new Date(Date.now() - 1800000).toISOString(),
-        type: "member",
-        details: { role: "member", workspace: "campaign-team" },
-      },
-      {
-        id: 2,
-        user: "Sarah Johnson",
-        action: "shared template",
-        target: "Follow-up Sequence",
-        timestamp: new Date(Date.now() - 5400000).toISOString(),
-        type: "template",
-        details: { templateId: 2, workspace: "main" },
-      },
-      {
-        id: 3,
-        user: "John Smith",
-        action: "updated role permissions",
-        target: "Manager role",
-        timestamp: new Date(Date.now() - 97200000).toISOString(),
-        type: "role",
-        details: { roleId: "manager", addedPermissions: ["export_data"] },
-      },
-      {
-        id: 4,
-        user: "Mike Wilson",
-        action: "joined workspace",
-        target: "Campaign Team",
-        timestamp: new Date(Date.now() - 176400000).toISOString(),
-        type: "workspace",
-        details: { workspaceId: "campaign-team" },
-      },
-    ];
-
-    res.json({ activities });
-  } catch (error) {
-    console.error("Error fetching team activity:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Invite team member
-app.post("/api/team/invite", async (req, res) => {
-  try {
-    const { email, role, workspaces, message } = req.body;
-
-    if (!email || !role) {
-      return res.status(400).json({
-        error: "Email and role are required",
-      });
-    }
-
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return res.status(400).json({ error: "Invalid email format" });
-    }
-
-    const invitation = {
-      id: Date.now(),
-      email,
-      role,
-      workspaces: workspaces || [],
-      message: message || "",
-      invitedBy: "current_user", // In a real app, get from auth context
-      invitedAt: new Date().toISOString(),
-      status: "pending",
-      expiresAt: new Date(Date.now() + 604800000).toISOString(), // 7 days
-    };
-
-    // In a real application, send invitation email
-    console.log("Sent invitation:", invitation);
-
-    res.json({
-      message: "Invitation sent successfully",
-      invitation,
-    });
-  } catch (error) {
-    console.error("Error sending invitation:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Update member role
-app.put("/api/team/members/:id/role", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { role } = req.body;
-
-    if (!role) {
-      return res.status(400).json({ error: "Role is required" });
-    }
-
-    // In a real application, update in database
-    console.log(`Updated member ${id} role to ${role}`);
-
-    res.json({
-      message: "Member role updated successfully",
-      memberId: id,
-      newRole: role,
-      updatedAt: new Date().toISOString(),
-    });
-  } catch (error) {
-    console.error("Error updating member role:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Create custom role
-app.post("/api/team/roles", async (req, res) => {
-  try {
-    const { name, description, permissions, color } = req.body;
-
-    if (!name || !permissions || permissions.length === 0) {
-      return res.status(400).json({
-        error: "Role name and at least one permission are required",
-      });
-    }
-
-    const newRole = {
-      id: name.toLowerCase().replace(/\s+/g, "_"),
-      name,
-      description: description || "",
-      permissions,
-      color: color || "#3B82F6",
-      memberCount: 0,
-      createdAt: new Date().toISOString(),
-      createdBy: "current_user", // In a real app, get from auth context
-    };
-
-    // In a real application, save to database
-    console.log("Created new role:", newRole);
-
-    res.json({
-      message: "Role created successfully",
-      role: newRole,
-    });
-  } catch (error) {
-    console.error("Error creating role:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Share template
-app.post("/api/team/templates/:id/share", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { workspaces, users } = req.body;
-
-    // In a real application, update template sharing settings
-    console.log(
-      `Shared template ${id} with workspaces:`,
-      workspaces,
-      "and users:",
-      users
-    );
-
-    res.json({
-      message: "Template shared successfully",
-      templateId: id,
-      sharedWith: { workspaces, users },
-      sharedAt: new Date().toISOString(),
-    });
-  } catch (error) {
-    console.error("Error sharing template:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Instagram Service Management - TEMPORARILY DISABLED DUE TO MISSING DEPENDENCIES
-// const InstagramService = require("./services/instagramService_fixed.js");
-
-// Global Instagram service instance
-let instagramService = null;
-
-// Get Saved Instagram Accounts - USING BASIC ACCOUNTS STORE
-app.get("/api/instagram/accounts", async (req, res) => {
-  try {
-    const accounts = accountsStore.loadAccounts();
-    // Return only usernames, not sensitive data like cookies
-    const accountList = accounts.map((account) => ({
-      username: account.username,
-      hasSession: account.cookies && account.cookies.length > 0,
-    }));
-
-    res.json({
-      status: "success",
-      accounts: accountList,
-    });
-  } catch (error) {
-    console.error("Error getting saved accounts:", error);
-    res.status(500).json({
-      status: "error",
-      message: error.message,
-    });
-  }
-});
-
-// Instagram Login (with saved cookies or fresh login)
-app.post("/api/instagram/login", async (req, res) => {
-  try {
-    const { username, password } = req.body;
-
-    if (!username) {
-      return res.status(400).json({
-        status: "error",
-        message: "Username is required",
-      });
-    }
-
-    // Instantiate InstagramService for this request, potentially passing username
-    // if your service is designed to handle user-specific sessions this way.
-    // If you maintain a single global instagramService instance, this part will differ.
-    // For this example, we create a new service instance for the login attempt.
-    // This assumes instagramService is designed to be instantiated per-operation or per-user.
-    // Consider if a global instance needs to be managed differently.
-
-    // If you have a global instagramService instance that needs to be (re)initialized for a user:
-    if (instagramService && typeof instagramService.close === "function") {
-      // await instagramService.close(); // Close previous session if any
-    }
-    // The refactored InstagramService constructor might take username for session path
-    // instagramService = new InstagramService(username); // TEMPORARILY DISABLED
-
-    // TEMPORARY SIMPLE LOGIN RESPONSE
-    if (password) {
-      return res.json({
-        status: "success",
-        message:
-          "Login functionality temporarily simplified. Use /api/add-account for full Instagram login.",
-        user: username,
-      });
-    } else {
-      return res.status(401).json({
-        status: "error",
-        message: "Password required for login",
-      });
-    }
-  } catch (error) {
-    console.error("Instagram login error in route:", error); // Added "in route" for clarity
-    res.status(500).json({
-      status: "error",
-      // Send a more generic message to the client for security
-      message: "An internal server error occurred during login.",
-      // message: error.message, // Avoid sending detailed error messages to client
-    });
-  }
-});
-
-// Get Login Status - TEMPORARILY SIMPLIFIED
-app.get("/api/instagram/status", async (req, res) => {
-  try {
-    // TEMPORARY: Return basic status since InstagramService is disabled
-    res.json({
-      status: "success",
-      isLoggedIn: false,
-      currentUser: null,
-      message:
-        "Instagram service temporarily simplified. Use /api/accounts to check saved accounts.",
-    });
-  } catch (error) {
-    console.error("Error getting status:", error);
-    res.status(500).json({
-      status: "error",
-      message: error.message,
-    });
-  }
-});
+  logger.info("Shutdown complete, exiting process");
+}

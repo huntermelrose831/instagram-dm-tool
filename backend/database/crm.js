@@ -45,7 +45,7 @@ function getContacts(filters = {}) {
 
   query += " GROUP BY c.id ORDER BY c.last_interaction DESC NULLS LAST";
   const contacts = db.prepare(query).all(params);
-  
+
   // Get notes separately to avoid JSON concatenation issues
   const getNotesStmt = db.prepare(`
     SELECT id, content, created_at 
@@ -53,7 +53,7 @@ function getContacts(filters = {}) {
     WHERE contact_id = ? 
     ORDER BY created_at DESC
   `);
-  
+
   return contacts.map((contact) => ({
     ...contact,
     tags: contact.tags ? contact.tags.split(",") : [],
@@ -156,6 +156,29 @@ function recordInteraction(contactId, type, content, campaignId = null) {
   })();
 }
 
+function deleteContact(contactId) {
+  const id = parseInt(contactId, 10);
+  if (Number.isNaN(id)) {
+    throw new Error("Invalid contact id");
+  }
+  // Get contact before delete (optional for response)
+  const existing = getContacts({ id })[0];
+  if (!existing) return { deleted: false };
+  const stmt = db.prepare(`DELETE FROM crm_contacts WHERE id = ?`);
+  const info = stmt.run(id);
+  return { deleted: info.changes > 0, contact: existing };
+}
+
+function deleteContactByUsername(username) {
+  const contact = db
+    .prepare(`SELECT * FROM crm_contacts WHERE username = ?`)
+    .get(username);
+  if (!contact) return { deleted: false };
+  const stmt = db.prepare(`DELETE FROM crm_contacts WHERE username = ?`);
+  const info = stmt.run(username);
+  return { deleted: info.changes > 0, contact };
+}
+
 module.exports = {
   createContact,
   getContacts,
@@ -165,4 +188,6 @@ module.exports = {
   addTagToContact,
   removeTagFromContact,
   recordInteraction,
+  deleteContact,
+  deleteContactByUsername,
 };

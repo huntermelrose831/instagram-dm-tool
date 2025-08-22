@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
+import { useReportsState } from "./contexts/AppStateContext";
 import {
   MdFileDownload,
   MdSchedule,
-  MdFilterList,
   MdAdd,
   MdEdit,
   MdDelete,
@@ -10,269 +10,170 @@ import {
   MdSettings,
   MdTrendingUp,
   MdBarChart,
-  MdPieChart,
   MdTableChart,
   MdEmail,
-  MdCloud,
   MdRefresh,
+  MdAccessTime,
 } from "react-icons/md";
 
 const ReportingExport = () => {
-  const [activeTab, setActiveTab] = useState("reports");
-  const [reports, setReports] = useState([]);
-  const [scheduledReports, setScheduledReports] = useState([]);
-  const [customReports, setCustomReports] = useState([]);
-  const [exportJobs, setExportJobs] = useState([]);
-  const [showReportBuilder, setShowReportBuilder] = useState(false);
-  const [selectedReport, setSelectedReport] = useState(null);
+  const { reportsState, setReportsState } = useReportsState();
+
+  // Use context state instead of local state
+  const {
+    activeTab,
+    reports,
+    scheduledReports,
+    exportJobs,
+    showReportBuilder,
+    reportConfig,
+  } = reportsState;
+
+  // Local state for loading and API data
   const [loading, setLoading] = useState(false);
 
-  // Report builder state
-  const [reportConfig, setReportConfig] = useState({
-    name: "",
-    type: "standard",
-    dateRange: "last_30_days",
-    metrics: [],
-    filters: {},
-    visualization: "table",
-    format: "pdf",
-    recipients: [],
-    schedule: {
-      frequency: "manual",
-      time: "09:00",
-      days: [],
-    },
-  });
+  // Helper functions to update context state
+  const updateState = (updates) => {
+    setReportsState({ ...reportsState, ...updates });
+  };
+
+  const setActiveTab = (tab) => updateState({ activeTab: tab });
+  const setReports = (reports) => updateState({ reports });
+  const setScheduledReports = (scheduledReports) =>
+    updateState({ scheduledReports });
+  const setExportJobs = (exportJobs) => updateState({ exportJobs });
+  const setShowReportBuilder = (show) =>
+    updateState({ showReportBuilder: show });
+  const setReportConfig = (config) => updateState({ reportConfig: config });
 
   useEffect(() => {
     fetchReports();
-    fetchScheduledReports();
+    fetchScheduled();
     fetchExportJobs();
+
+    // Poll export jobs less frequently - only every 30 seconds instead of 5
+    const poll = setInterval(() => {
+      fetchExportJobs();
+    }, 30000);
+
+    return () => clearInterval(poll);
   }, []);
 
   const fetchReports = async () => {
     try {
-      setLoading(true);
-      const response = await fetch("/api/reports");
-      const data = await response.json();
+      const res = await fetch("/api/reports");
+      const data = await res.json();
       setReports(data.reports || []);
-      setCustomReports(data.customReports || []);
-    } catch (error) {
-      console.error("Error fetching reports:", error);
-    } finally {
-      setLoading(false);
+    } catch (e) {
+      console.error(e);
     }
   };
-
-  const fetchScheduledReports = async () => {
+  const fetchScheduled = async () => {
     try {
-      const response = await fetch("/api/reports/scheduled");
-      const data = await response.json();
+      const res = await fetch("/api/reports/scheduled");
+      const data = await res.json();
       setScheduledReports(data.scheduledReports || []);
-    } catch (error) {
-      console.error("Error fetching scheduled reports:", error);
+    } catch (e) {
+      console.error(e);
     }
   };
-
   const fetchExportJobs = async () => {
     try {
-      const response = await fetch("/api/exports/jobs");
-      const data = await response.json();
+      const res = await fetch("/api/exports/jobs");
+      const data = await res.json();
       setExportJobs(data.jobs || []);
-    } catch (error) {
-      console.error("Error fetching export jobs:", error);
+    } catch (e) {
+      console.error(e);
     }
   };
 
   const handleCreateReport = async () => {
+    if (!reportConfig.name || reportConfig.metrics.length === 0) return;
+    setLoading(true);
     try {
-      setLoading(true);
-      const response = await fetch("/api/reports/create", {
+      await fetch("/api/reports/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(reportConfig),
       });
-
-      if (response.ok) {
-        await fetchReports();
-        setShowReportBuilder(false);
-        resetReportConfig();
-      }
-    } catch (error) {
-      console.error("Error creating report:", error);
+      setShowReportBuilder(false);
+      setReportConfig({
+        name: "",
+        type: "standard",
+        dateRange: "last_30_days",
+        metrics: [],
+        filters: {},
+        visualization: "table",
+        format: "csv",
+        schedule: { frequency: "manual", time: "09:00", days: [] },
+      });
+      fetchReports();
+      fetchScheduled();
+    } catch (e) {
+      console.error(e);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleExportReport = async (reportId, format) => {
+  const handleRunReport = async (id) => {
     try {
-      setLoading(true);
-      const response = await fetch(`/api/reports/${reportId}/export`, {
+      await fetch(`/api/reports/${id}/run`, { method: "POST" });
+      fetchReports();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleExportReport = async (id, format = "csv") => {
+    try {
+      const res = await fetch(`/api/reports/${id}/export`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ format }),
       });
-
-      if (response.ok) {
-        const blob = await response.blob();
+      if (res.ok) {
+        const blob = await res.blob();
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `report-${reportId}.${format}`;
+        a.download = `report-${id}.${format === "excel" ? "csv" : format}`;
         a.click();
         window.URL.revokeObjectURL(url);
       }
-    } catch (error) {
-      console.error("Error exporting report:", error);
-    } finally {
-      setLoading(false);
+    } catch (e) {
+      console.error(e);
     }
   };
 
-  const resetReportConfig = () => {
-    setReportConfig({
-      name: "",
-      type: "standard",
-      dateRange: "last_30_days",
-      metrics: [],
-      filters: {},
-      visualization: "table",
-      format: "pdf",
-      recipients: [],
-      schedule: {
-        frequency: "manual",
-        time: "09:00",
-        days: [],
-      },
-    });
+  const handleDeleteReport = async (id) => {
+    if (!window.confirm("Delete this report?")) return;
+    try {
+      await fetch(`/api/reports/${id}`, { method: "DELETE" });
+      fetchReports();
+      fetchScheduled();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleStartExport = async (type) => {
+    try {
+      await fetch("/api/exports/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type, format: "csv" }),
+      });
+      fetchExportJobs();
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   const availableMetrics = [
-    { id: "messages_sent", label: "Messages Sent", category: "messaging" },
-    {
-      id: "responses_received",
-      label: "Responses Received",
-      category: "messaging",
-    },
-    { id: "leads_generated", label: "Leads Generated", category: "leads" },
-    {
-      id: "conversion_rate",
-      label: "Conversion Rate",
-      category: "performance",
-    },
-    {
-      id: "account_engagement",
-      label: "Account Engagement",
-      category: "engagement",
-    },
-    { id: "follower_growth", label: "Follower Growth", category: "growth" },
-    {
-      id: "campaign_performance",
-      label: "Campaign Performance",
-      category: "campaigns",
-    },
-    {
-      id: "automation_efficiency",
-      label: "Automation Efficiency",
-      category: "automation",
-    },
-  ];
-
-  const reportTemplates = [
-    {
-      id: "daily_summary",
-      name: "Daily Summary Report",
-      description: "Key metrics and activities from the last 24 hours",
-      metrics: ["messages_sent", "responses_received", "leads_generated"],
-      visualization: "chart",
-    },
-    {
-      id: "weekly_performance",
-      name: "Weekly Performance Report",
-      description: "Comprehensive weekly performance analysis",
-      metrics: ["conversion_rate", "account_engagement", "follower_growth"],
-      visualization: "dashboard",
-    },
-    {
-      id: "campaign_analysis",
-      name: "Campaign Analysis Report",
-      description: "Detailed campaign performance and ROI analysis",
-      metrics: ["campaign_performance", "automation_efficiency"],
-      visualization: "table",
-    },
-    {
-      id: "lead_generation",
-      name: "Lead Generation Report",
-      description: "Lead quality, sources, and conversion tracking",
-      metrics: ["leads_generated", "conversion_rate"],
-      visualization: "funnel",
-    },
-  ];
-
-  const mockReports = [
-    {
-      id: 1,
-      name: "Weekly Performance Summary",
-      type: "scheduled",
-      lastGenerated: "2024-12-20 09:00",
-      nextGeneration: "2024-12-27 09:00",
-      status: "active",
-      format: "pdf",
-      recipients: ["manager@company.com"],
-    },
-    {
-      id: 2,
-      name: "Campaign ROI Analysis",
-      type: "custom",
-      lastGenerated: "2024-12-19 14:30",
-      status: "completed",
-      format: "excel",
-      downloadable: true,
-    },
-    {
-      id: 3,
-      name: "Lead Quality Assessment",
-      type: "automated",
-      lastGenerated: "2024-12-20 06:00",
-      nextGeneration: "2024-12-21 06:00",
-      status: "active",
-      format: "csv",
-    },
-  ];
-
-  const mockExportJobs = [
-    {
-      id: 1,
-      name: "All Leads Export",
-      type: "leads",
-      status: "completed",
-      progress: 100,
-      createdAt: "2024-12-20 10:30",
-      completedAt: "2024-12-20 10:32",
-      recordCount: 1547,
-      fileSize: "2.3 MB",
-      downloadUrl: "/downloads/leads-export-123.csv",
-    },
-    {
-      id: 2,
-      name: "Campaign Data Export",
-      type: "campaigns",
-      status: "processing",
-      progress: 67,
-      createdAt: "2024-12-20 11:15",
-      estimatedCompletion: "2024-12-20 11:25",
-      recordCount: 890,
-    },
-    {
-      id: 3,
-      name: "Message History Export",
-      type: "messages",
-      status: "queued",
-      progress: 0,
-      createdAt: "2024-12-20 11:20",
-      estimatedStart: "2024-12-20 11:30",
-    },
+    { id: "messages_sent", label: "Messages Sent" },
+    { id: "leads_generated", label: "Leads Generated" },
+    { id: "conversion_rate", label: "Conversion Rate" },
   ];
 
   return (
@@ -316,120 +217,463 @@ const ReportingExport = () => {
       {/* Reports Tab */}
       {activeTab === "reports" && (
         <div className="space-y-6">
+          {/* Summary Stats */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="bg-white border border-gray-200 rounded-lg p-4">
+              <div className="flex items-center">
+                <MdBarChart className="text-blue-600 mr-3" size={24} />
+                <div>
+                  <div className="text-2xl font-bold text-gray-900">
+                    {reports.length}
+                  </div>
+                  <div className="text-sm text-gray-600">Total Reports</div>
+                </div>
+              </div>
+            </div>
+            <div className="bg-white border border-gray-200 rounded-lg p-4">
+              <div className="flex items-center">
+                <MdSchedule className="text-green-600 mr-3" size={24} />
+                <div>
+                  <div className="text-2xl font-bold text-gray-900">
+                    {scheduledReports.length}
+                  </div>
+                  <div className="text-sm text-gray-600">Scheduled</div>
+                </div>
+              </div>
+            </div>
+            <div className="bg-white border border-gray-200 rounded-lg p-4">
+              <div className="flex items-center">
+                <MdFileDownload className="text-purple-600 mr-3" size={24} />
+                <div>
+                  <div className="text-2xl font-bold text-gray-900">
+                    {exportJobs.filter((j) => j.status === "completed").length}
+                  </div>
+                  <div className="text-sm text-gray-600">Exports Complete</div>
+                </div>
+              </div>
+            </div>
+            <div className="bg-white border border-gray-200 rounded-lg p-4">
+              <div className="flex items-center">
+                <MdTrendingUp className="text-orange-600 mr-3" size={24} />
+                <div>
+                  <div className="text-2xl font-bold text-gray-900">
+                    {reports.filter((r) => r.last_generated).length}
+                  </div>
+                  <div className="text-sm text-gray-600">Reports Generated</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Quick Actions */}
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
               <button
                 onClick={() => setShowReportBuilder(true)}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center"
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center transition-colors"
               >
                 <MdAdd className="mr-2" size={20} />
                 Create Report
               </button>
               <button
-                onClick={fetchReports}
-                className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 flex items-center"
+                onClick={() => {
+                  fetchReports();
+                  fetchScheduled();
+                }}
+                className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 flex items-center transition-colors"
               >
                 <MdRefresh className="mr-2" size={16} />
                 Refresh
               </button>
             </div>
+            <div className="text-sm text-gray-600">
+              Last updated: {new Date().toLocaleTimeString()}
+            </div>
           </div>
 
-          {/* Report Templates */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {reportTemplates.map((template) => (
-              <div
-                key={template.id}
-                className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow"
-              >
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex-1">
-                    <h3 className="font-semibold text-gray-900 mb-1">
-                      {template.name}
-                    </h3>
-                    <p className="text-sm text-gray-600 mb-2">
-                      {template.description}
-                    </p>
-                  </div>
-                  <MdTableChart className="text-gray-400" size={20} />
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-gray-500">
-                    {template.metrics.length} metrics
-                  </span>
-                  <button
+          {/* Reports Table */}
+          <div className="bg-white border border-gray-200 rounded-lg">
+            <div className="p-4 border-b border-gray-200">
+              <h2 className="text-lg font-semibold text-gray-900">Reports</h2>
+            </div>
+
+            {reports.length === 0 ? (
+              <div className="p-8 text-center">
+                <MdBarChart className="mx-auto text-gray-400 mb-4" size={48} />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">
+                  No Reports Yet
+                </h3>
+                <p className="text-gray-600 mb-4">
+                  Create your first report to track your DM performance
+                </p>
+                <button
+                  onClick={() => setShowReportBuilder(true)}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+                >
+                  Create Your First Report
+                </button>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left font-medium text-gray-500">
+                        Report
+                      </th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-500">
+                        Metrics
+                      </th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-500">
+                        Schedule
+                      </th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-500">
+                        Last Generated
+                      </th>
+                      <th className="px-4 py-3 text-left font-medium text-gray-500">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {reports.map((r) => (
+                      <tr key={r.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3">
+                          <div>
+                            <div className="font-medium text-gray-900">
+                              {r.name}
+                            </div>
+                            <div className="text-sm text-gray-600 flex items-center space-x-2">
+                              <span className="capitalize">{r.type}</span>
+                              <span>•</span>
+                              <span>{r.date_range?.replace("_", " ")}</span>
+                              <span>•</span>
+                              <span className="uppercase">{r.format}</span>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap gap-1">
+                            {r.metrics?.slice(0, 2).map((metric) => (
+                              <span
+                                key={metric}
+                                className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs font-medium"
+                              >
+                                {availableMetrics.find((m) => m.id === metric)
+                                  ?.label || metric}
+                              </span>
+                            ))}
+                            {r.metrics?.length > 2 && (
+                              <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs">
+                                +{r.metrics.length - 2} more
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center space-x-1">
+                            {r.schedule_frequency === "manual" ? (
+                              <span className="text-gray-500">Manual</span>
+                            ) : (
+                              <>
+                                <MdSchedule
+                                  size={14}
+                                  className="text-blue-600"
+                                />
+                                <span className="text-gray-700 capitalize">
+                                  {r.schedule_frequency}
+                                </span>
+                                {r.schedule_time && (
+                                  <span className="text-gray-500 text-xs">
+                                    @ {r.schedule_time}
+                                  </span>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-gray-600">
+                          {r.last_generated
+                            ? new Date(r.last_generated).toLocaleDateString()
+                            : "Never"}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center space-x-2">
+                            <button
+                              onClick={() => handleRunReport(r.id)}
+                              className="p-1 text-green-600 hover:text-green-800 hover:bg-green-50 rounded"
+                              title="Run Report"
+                            >
+                              <MdPlayArrow size={18} />
+                            </button>
+                            <button
+                              onClick={() =>
+                                handleExportReport(r.id, r.format || "csv")
+                              }
+                              className="p-1 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded"
+                              title="Export Report"
+                            >
+                              <MdFileDownload size={18} />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteReport(r.id)}
+                              className="p-1 text-red-600 hover:text-red-800 hover:bg-red-50 rounded"
+                              title="Delete Report"
+                            >
+                              <MdDelete size={18} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Report Builder Tab */}
+      {activeTab === "builder" && (
+        <div className="space-y-6">
+          <div className="bg-white border border-gray-200 rounded-lg p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">
+              Advanced Report Builder
+            </h2>
+
+            {/* Quick Templates */}
+            <div className="mb-6">
+              <h3 className="text-md font-medium text-gray-700 mb-3">
+                Quick Templates
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {[
+                  {
+                    name: "DM Performance Report",
+                    metrics: [
+                      "messages_sent",
+                      "leads_generated",
+                      "conversion_rate",
+                    ],
+                    type: "standard",
+                    dateRange: "last_30_days",
+                  },
+                  {
+                    name: "Lead Generation Summary",
+                    metrics: ["leads_generated"],
+                    type: "summary",
+                    dateRange: "last_7_days",
+                  },
+                  {
+                    name: "Monthly Analytics",
+                    metrics: [
+                      "messages_sent",
+                      "leads_generated",
+                      "conversion_rate",
+                    ],
+                    type: "detailed",
+                    dateRange: "last_30_days",
+                  },
+                ].map((template, index) => (
+                  <div
+                    key={index}
+                    className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow cursor-pointer"
                     onClick={() => {
                       setReportConfig({
                         ...reportConfig,
                         name: template.name,
                         metrics: template.metrics,
-                        visualization: template.visualization,
+                        type: template.type,
+                        dateRange: template.dateRange,
                       });
                       setShowReportBuilder(true);
                     }}
-                    className="text-blue-600 hover:text-blue-800 text-sm font-medium"
                   >
-                    Use Template
-                  </button>
+                    <h4 className="font-medium text-gray-900 mb-2">
+                      {template.name}
+                    </h4>
+                    <div className="text-sm text-gray-600 mb-2">
+                      {template.metrics.length} metrics •{" "}
+                      {template.dateRange.replace("_", " ")}
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {template.metrics.slice(0, 2).map((metric) => (
+                        <span
+                          key={metric}
+                          className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs"
+                        >
+                          {availableMetrics.find((m) => m.id === metric)
+                            ?.label || metric}
+                        </span>
+                      ))}
+                      {template.metrics.length > 2 && (
+                        <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded text-xs">
+                          +{template.metrics.length - 2} more
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Advanced Options */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div>
+                <h3 className="text-md font-medium text-gray-700 mb-3">
+                  Available Metrics
+                </h3>
+                <div className="space-y-2">
+                  {availableMetrics.map((metric) => (
+                    <div
+                      key={metric.id}
+                      className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+                    >
+                      <div>
+                        <div className="font-medium text-gray-900">
+                          {metric.label}
+                        </div>
+                        <div className="text-sm text-gray-600">
+                          Track {metric.label.toLowerCase()}
+                        </div>
+                      </div>
+                      <MdBarChart className="text-blue-600" size={20} />
+                    </div>
+                  ))}
                 </div>
               </div>
-            ))}
-          </div>
 
-          {/* Recent Reports */}
+              <div>
+                <h3 className="text-md font-medium text-gray-700 mb-3">
+                  Export Formats
+                </h3>
+                <div className="space-y-2">
+                  {[
+                    {
+                      id: "csv",
+                      label: "CSV",
+                      desc: "Comma-separated values for spreadsheets",
+                    },
+                    {
+                      id: "json",
+                      label: "JSON",
+                      desc: "Machine-readable data format",
+                    },
+                    {
+                      id: "excel",
+                      label: "Excel",
+                      desc: "Microsoft Excel format",
+                    },
+                  ].map((format) => (
+                    <div
+                      key={format.id}
+                      className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+                    >
+                      <div>
+                        <div className="font-medium text-gray-900">
+                          {format.label}
+                        </div>
+                        <div className="text-sm text-gray-600">
+                          {format.desc}
+                        </div>
+                      </div>
+                      <MdFileDownload className="text-green-600" size={20} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Custom Report Button */}
+            <div className="mt-6 text-center">
+              <button
+                onClick={() => setShowReportBuilder(true)}
+                className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors inline-flex items-center"
+              >
+                <MdAdd className="mr-2" size={20} />
+                Create Custom Report
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Scheduled Reports Tab */}
+      {activeTab === "scheduled" && (
+        <div className="space-y-6">
+          {/* Scheduled Reports Overview */}
           <div className="bg-white border border-gray-200 rounded-lg">
             <div className="p-4 border-b border-gray-200">
-              <h2 className="text-lg font-semibold text-gray-900">
-                Recent Reports
-              </h2>
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-gray-900">
+                  Scheduled Reports
+                </h2>
+                <div className="flex items-center space-x-2">
+                  <MdSchedule className="text-blue-600" size={20} />
+                  <span className="text-sm text-gray-600">
+                    {scheduledReports.length} scheduled
+                  </span>
+                </div>
+              </div>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left font-medium text-gray-500">
-                      Name
-                    </th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-500">
-                      Type
-                    </th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-500">
-                      Last Generated
-                    </th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-500">
-                      Status
-                    </th>
-                    <th className="px-4 py-3 text-left font-medium text-gray-500">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {mockReports.map((report) => (
-                    <tr key={report.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-medium text-gray-900">
-                        {report.name}
-                      </td>
-                      <td className="px-4 py-3">
+
+            {scheduledReports.length === 0 ? (
+              <div className="p-8 text-center">
+                <MdSchedule className="mx-auto text-gray-400 mb-4" size={48} />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">
+                  No Scheduled Reports
+                </h3>
+                <p className="text-gray-600 mb-4">
+                  Create automated reports that run on your schedule
+                </p>
+                <button
+                  onClick={() => setShowReportBuilder(true)}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+                >
+                  Create Scheduled Report
+                </button>
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-200">
+                {scheduledReports.map((report) => (
+                  <div key={report.id} className="p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <h3 className="font-medium text-gray-900">
+                          {report.name}
+                        </h3>
+                        <div className="flex items-center space-x-4 text-sm text-gray-600 mt-1">
+                          <span className="flex items-center">
+                            <MdAccessTime className="mr-1" size={14} />
+                            {report.schedule_frequency} at{" "}
+                            {report.schedule_time}
+                          </span>
+                          {report.schedule_days &&
+                            report.schedule_days.length > 0 && (
+                              <span>
+                                Days:{" "}
+                                {report.schedule_days
+                                  .map(
+                                    (day) =>
+                                      [
+                                        "Sun",
+                                        "Mon",
+                                        "Tue",
+                                        "Wed",
+                                        "Thu",
+                                        "Fri",
+                                        "Sat",
+                                      ][day]
+                                  )
+                                  .join(", ")}
+                              </span>
+                            )}
+                        </div>
+                      </div>
+                      <div className="flex items-center space-x-2">
                         <span
-                          className={`px-2 py-1 rounded-full text-xs font-medium ${
-                            report.type === "scheduled"
-                              ? "bg-blue-100 text-blue-800"
-                              : report.type === "custom"
-                                ? "bg-purple-100 text-purple-800"
-                                : "bg-green-100 text-green-800"
-                          }`}
-                        >
-                          {report.type}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-gray-600">
-                        {report.lastGenerated}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={`px-2 py-1 rounded-full text-xs font-medium ${
+                          className={`px-3 py-1 rounded-full text-sm font-medium ${
                             report.status === "active"
                               ? "bg-green-100 text-green-800"
                               : "bg-gray-100 text-gray-800"
@@ -437,39 +681,79 @@ const ReportingExport = () => {
                         >
                           {report.status}
                         </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center space-x-2">
-                          {report.downloadable && (
-                            <button
-                              onClick={() =>
-                                handleExportReport(report.id, report.format)
-                              }
-                              className="text-blue-600 hover:text-blue-800"
-                              title="Download"
-                            >
-                              <MdFileDownload size={16} />
-                            </button>
-                          )}
-                          <button
-                            className="text-gray-600 hover:text-gray-800"
-                            title="Edit"
-                          >
-                            <MdEdit size={16} />
-                          </button>
-                          <button
-                            className="text-red-600 hover:text-red-800"
-                            title="Delete"
-                          >
-                            <MdDelete size={16} />
-                          </button>
+                        <button
+                          onClick={() => handleRunReport(report.id)}
+                          className="text-blue-600 hover:text-blue-800"
+                          title="Run Now"
+                        >
+                          <MdPlayArrow size={20} />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteReport(report.id)}
+                          className="text-red-600 hover:text-red-800"
+                          title="Delete"
+                        >
+                          <MdDelete size={20} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="bg-gray-50 rounded-lg p-3">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                        <div>
+                          <span className="text-gray-500">Type:</span>
+                          <div className="font-medium">{report.type}</div>
                         </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                        <div>
+                          <span className="text-gray-500">Date Range:</span>
+                          <div className="font-medium">{report.date_range}</div>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">Format:</span>
+                          <div className="font-medium uppercase">
+                            {report.format}
+                          </div>
+                        </div>
+                        <div>
+                          <span className="text-gray-500">Next Run:</span>
+                          <div className="font-medium">
+                            {report.next_run
+                              ? new Date(report.next_run).toLocaleDateString()
+                              : "—"}
+                          </div>
+                        </div>
+                      </div>
+
+                      {report.metrics && report.metrics.length > 0 && (
+                        <div className="mt-3 pt-3 border-t border-gray-200">
+                          <span className="text-gray-500 text-sm">
+                            Metrics:
+                          </span>
+                          <div className="flex flex-wrap gap-2 mt-1">
+                            {report.metrics.map((metric) => (
+                              <span
+                                key={metric}
+                                className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs font-medium"
+                              >
+                                {availableMetrics.find((m) => m.id === metric)
+                                  ?.label || metric}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {report.last_generated && (
+                        <div className="mt-2 pt-2 border-t border-gray-200 text-sm text-gray-600">
+                          Last generated:{" "}
+                          {new Date(report.last_generated).toLocaleString()}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -483,36 +767,39 @@ const ReportingExport = () => {
               {
                 type: "leads",
                 label: "Export Leads",
-                description: "All lead data with contact information",
                 icon: MdTrendingUp,
+                desc: "All lead data",
               },
               {
                 type: "messages",
                 label: "Export Messages",
-                description: "Message history and conversations",
                 icon: MdEmail,
+                desc: "Message history",
               },
               {
                 type: "analytics",
                 label: "Export Analytics",
-                description: "Performance metrics and statistics",
                 icon: MdBarChart,
+                desc: "Performance metrics",
               },
-            ].map((exportType) => {
-              const Icon = exportType.icon;
+            ].map((opt) => {
+              const Icon = opt.icon;
               return (
                 <div
-                  key={exportType.type}
+                  key={opt.type}
                   className="bg-white border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow"
                 >
                   <div className="flex items-center mb-4">
                     <Icon className="text-blue-600 mr-3" size={24} />
                     <h3 className="text-lg font-semibold text-gray-900">
-                      {exportType.label}
+                      {opt.label}
                     </h3>
                   </div>
-                  <p className="text-gray-600 mb-4">{exportType.description}</p>
-                  <button className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700">
+                  <p className="text-gray-600 mb-4">{opt.desc}</p>
+                  <button
+                    onClick={() => handleStartExport(opt.type)}
+                    className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700"
+                  >
                     Start Export
                   </button>
                 </div>
@@ -523,71 +810,136 @@ const ReportingExport = () => {
           {/* Export Jobs */}
           <div className="bg-white border border-gray-200 rounded-lg">
             <div className="p-4 border-b border-gray-200">
-              <h2 className="text-lg font-semibold text-gray-900">
-                Export Jobs
-              </h2>
-            </div>
-            <div className="p-4 space-y-4">
-              {mockExportJobs.map((job) => (
-                <div
-                  key={job.id}
-                  className="border border-gray-200 rounded-lg p-4"
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-gray-900">
+                  Export Jobs
+                </h2>
+                <button
+                  onClick={fetchExportJobs}
+                  className="text-gray-500 hover:text-gray-700"
+                  title="Refresh"
                 >
-                  <div className="flex items-center justify-between mb-3">
-                    <div>
-                      <h3 className="font-medium text-gray-900">{job.name}</h3>
-                      <p className="text-sm text-gray-600">
-                        {job.type} •{" "}
-                        {job.recordCount
-                          ? `${job.recordCount} records`
-                          : "Processing..."}
-                      </p>
-                    </div>
-                    <span
-                      className={`px-3 py-1 rounded-full text-sm font-medium ${
-                        job.status === "completed"
-                          ? "bg-green-100 text-green-800"
-                          : job.status === "processing"
-                            ? "bg-blue-100 text-blue-800"
-                            : "bg-gray-100 text-gray-800"
-                      }`}
-                    >
-                      {job.status}
-                    </span>
-                  </div>
-
-                  {job.status === "processing" && (
-                    <div className="mb-3">
-                      <div className="flex items-center justify-between text-sm text-gray-600 mb-1">
-                        <span>Progress</span>
-                        <span>{job.progress}%</span>
-                      </div>
-                      <div className="w-full bg-gray-200 rounded-full h-2">
-                        <div
-                          className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                          style={{ width: `${job.progress}%` }}
-                        ></div>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="flex items-center justify-between text-sm text-gray-600">
-                    <span>
-                      {job.status === "completed"
-                        ? `Completed: ${job.completedAt}`
-                        : job.status === "processing"
-                          ? `Est. completion: ${job.estimatedCompletion}`
-                          : `Queued: ${job.createdAt}`}
-                    </span>
-                    {job.status === "completed" && job.downloadUrl && (
-                      <button className="text-blue-600 hover:text-blue-800 font-medium">
-                        Download ({job.fileSize})
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
+                  <MdRefresh size={20} />
+                </button>
+              </div>
             </div>
+
+            {exportJobs.length === 0 ? (
+              <div className="p-8 text-center">
+                <MdFileDownload
+                  className="mx-auto text-gray-400 mb-4"
+                  size={48}
+                />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">
+                  No Export Jobs
+                </h3>
+                <p className="text-gray-600">
+                  Start an export to see the progress here
+                </p>
+              </div>
+            ) : (
+              <div className="p-4 space-y-4">
+                {exportJobs.map((job) => (
+                  <div
+                    key={job.id}
+                    className="border border-gray-200 rounded-lg p-4 hover:shadow-sm transition-shadow"
+                  >
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center space-x-3">
+                        <div
+                          className={`w-3 h-3 rounded-full ${
+                            job.status === "completed"
+                              ? "bg-green-500"
+                              : job.status === "processing"
+                                ? "bg-blue-500 animate-pulse"
+                                : job.status === "error"
+                                  ? "bg-red-500"
+                                  : "bg-gray-400"
+                          }`}
+                        ></div>
+                        <div>
+                          <h3 className="font-medium text-gray-900 capitalize">
+                            {job.type} Export
+                          </h3>
+                          <div className="flex items-center space-x-2 text-sm text-gray-600">
+                            <span>Job #{job.id}</span>
+                            <span>•</span>
+                            <span>{job.format?.toUpperCase()}</span>
+                            {job.record_count && (
+                              <>
+                                <span>•</span>
+                                <span>{job.record_count} records</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <span
+                        className={`px-3 py-1 rounded-full text-sm font-medium capitalize ${
+                          job.status === "completed"
+                            ? "bg-green-100 text-green-800"
+                            : job.status === "processing"
+                              ? "bg-blue-100 text-blue-800"
+                              : job.status === "error"
+                                ? "bg-red-100 text-red-800"
+                                : "bg-gray-100 text-gray-800"
+                        }`}
+                      >
+                        {job.status}
+                      </span>
+                    </div>
+
+                    {/* Progress Bar for Processing Jobs */}
+                    {job.status === "processing" && (
+                      <div className="mb-3">
+                        <div className="flex items-center justify-between text-sm text-gray-600 mb-2">
+                          <span>Progress</span>
+                          <span>{job.progress}%</span>
+                        </div>
+                        <div className="w-full bg-gray-200 rounded-full h-2">
+                          <div
+                            className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                            style={{ width: `${job.progress}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Error Message */}
+                    {job.status === "error" && job.error && (
+                      <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+                        <div className="text-sm text-red-700">
+                          <strong>Error:</strong> {job.error}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Job Details and Actions */}
+                    <div className="flex items-center justify-between text-sm">
+                      <div className="text-gray-600">
+                        Created: {new Date(job.created_at).toLocaleString()}
+                        {job.completed_at && (
+                          <span className="ml-4">
+                            Completed:{" "}
+                            {new Date(job.completed_at).toLocaleString()}
+                          </span>
+                        )}
+                      </div>
+
+                      {job.status === "completed" && job.file_path && (
+                        <a
+                          href={`/api/exports/jobs/${job.id}/download`}
+                          className="inline-flex items-center text-blue-600 hover:text-blue-800 font-medium"
+                        >
+                          <MdFileDownload className="mr-1" size={16} />
+                          Download
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -596,55 +948,59 @@ const ReportingExport = () => {
       {showReportBuilder && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-semibold text-gray-900">
-                Create Custom Report
-              </h2>
-              <button
-                onClick={() => setShowReportBuilder(false)}
-                className="text-gray-400 hover:text-gray-600"
-              >
-                <span className="sr-only">Close</span>×
-              </button>
-            </div>
-
-            <div className="space-y-6">
-              {/* Report Name */}
+            <h2 className="text-xl font-semibold mb-4">Create Report</h2>
+            <div className="space-y-4">
+              {/* Basic Info */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                   Report Name
                 </label>
                 <input
-                  type="text"
+                  className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  placeholder="Enter report name"
                   value={reportConfig.name}
                   onChange={(e) =>
                     setReportConfig({ ...reportConfig, name: e.target.value })
                   }
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="Enter report name"
                 />
               </div>
 
-              {/* Date Range */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Date Range
-                </label>
-                <select
-                  value={reportConfig.dateRange}
-                  onChange={(e) =>
-                    setReportConfig({
-                      ...reportConfig,
-                      dateRange: e.target.value,
-                    })
-                  }
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                >
-                  <option value="last_7_days">Last 7 Days</option>
-                  <option value="last_30_days">Last 30 Days</option>
-                  <option value="last_90_days">Last 90 Days</option>
-                  <option value="custom">Custom Range</option>
-                </select>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Report Type
+                  </label>
+                  <select
+                    className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    value={reportConfig.type}
+                    onChange={(e) =>
+                      setReportConfig({ ...reportConfig, type: e.target.value })
+                    }
+                  >
+                    <option value="standard">Standard</option>
+                    <option value="summary">Summary</option>
+                    <option value="detailed">Detailed</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Date Range
+                  </label>
+                  <select
+                    className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    value={reportConfig.dateRange}
+                    onChange={(e) =>
+                      setReportConfig({
+                        ...reportConfig,
+                        dateRange: e.target.value,
+                      })
+                    }
+                  >
+                    <option value="last_7_days">Last 7 Days</option>
+                    <option value="last_30_days">Last 30 Days</option>
+                    <option value="last_90_days">Last 90 Days</option>
+                  </select>
+                </div>
               </div>
 
               {/* Metrics Selection */}
@@ -652,78 +1008,189 @@ const ReportingExport = () => {
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Metrics to Include
                 </label>
-                <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto">
-                  {availableMetrics.map((metric) => (
-                    <label key={metric.id} className="flex items-center">
+                <div className="grid grid-cols-2 gap-3">
+                  {availableMetrics.map((m) => (
+                    <label key={m.id} className="flex items-center text-sm">
                       <input
                         type="checkbox"
-                        checked={reportConfig.metrics.includes(metric.id)}
+                        className="mr-2 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                        checked={reportConfig.metrics.includes(m.id)}
                         onChange={(e) => {
-                          const updatedMetrics = e.target.checked
-                            ? [...reportConfig.metrics, metric.id]
-                            : reportConfig.metrics.filter(
-                                (m) => m !== metric.id
-                              );
                           setReportConfig({
                             ...reportConfig,
-                            metrics: updatedMetrics,
+                            metrics: e.target.checked
+                              ? [...reportConfig.metrics, m.id]
+                              : reportConfig.metrics.filter((x) => x !== m.id),
                           });
                         }}
-                        className="mr-2 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                       />
-                      <span className="text-sm text-gray-700">
-                        {metric.label}
-                      </span>
+                      {m.label}
                     </label>
                   ))}
                 </div>
               </div>
 
-              {/* Export Format */}
-              <div>
+              {/* Format and Visualization */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Visualization
+                  </label>
+                  <select
+                    className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    value={reportConfig.visualization}
+                    onChange={(e) =>
+                      setReportConfig({
+                        ...reportConfig,
+                        visualization: e.target.value,
+                      })
+                    }
+                  >
+                    <option value="table">Table</option>
+                    <option value="chart">Chart</option>
+                    <option value="dashboard">Dashboard</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Export Format
+                  </label>
+                  <select
+                    className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    value={reportConfig.format}
+                    onChange={(e) =>
+                      setReportConfig({
+                        ...reportConfig,
+                        format: e.target.value,
+                      })
+                    }
+                  >
+                    <option value="csv">CSV</option>
+                    <option value="json">JSON</option>
+                    <option value="excel">Excel</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Scheduling Options */}
+              <div className="border-t pt-4">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Export Format
+                  Schedule
                 </label>
-                <div className="flex space-x-4">
-                  {["pdf", "excel", "csv"].map((format) => (
-                    <label key={format} className="flex items-center">
-                      <input
-                        type="radio"
-                        name="format"
-                        value={format}
-                        checked={reportConfig.format === format}
-                        onChange={(e) =>
-                          setReportConfig({
-                            ...reportConfig,
-                            format: e.target.value,
-                          })
-                        }
-                        className="mr-2 text-blue-600 focus:ring-blue-500"
-                      />
-                      <span className="text-sm text-gray-700 capitalize">
-                        {format}
-                      </span>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm text-gray-600 mb-1">
+                      Frequency
                     </label>
-                  ))}
+                    <select
+                      className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      value={reportConfig.schedule.frequency}
+                      onChange={(e) =>
+                        setReportConfig({
+                          ...reportConfig,
+                          schedule: {
+                            ...reportConfig.schedule,
+                            frequency: e.target.value,
+                          },
+                        })
+                      }
+                    >
+                      <option value="manual">Manual</option>
+                      <option value="daily">Daily</option>
+                      <option value="weekly">Weekly</option>
+                      <option value="monthly">Monthly</option>
+                    </select>
+                  </div>
+
+                  {reportConfig.schedule.frequency !== "manual" && (
+                    <>
+                      <div>
+                        <label className="block text-sm text-gray-600 mb-1">
+                          Time
+                        </label>
+                        <input
+                          type="time"
+                          className="w-full border border-gray-300 px-3 py-2 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          value={reportConfig.schedule.time}
+                          onChange={(e) =>
+                            setReportConfig({
+                              ...reportConfig,
+                              schedule: {
+                                ...reportConfig.schedule,
+                                time: e.target.value,
+                              },
+                            })
+                          }
+                        />
+                      </div>
+
+                      {reportConfig.schedule.frequency === "weekly" && (
+                        <div>
+                          <label className="block text-sm text-gray-600 mb-1">
+                            Days of Week
+                          </label>
+                          <div className="flex flex-wrap gap-2">
+                            {[
+                              "Sunday",
+                              "Monday",
+                              "Tuesday",
+                              "Wednesday",
+                              "Thursday",
+                              "Friday",
+                              "Saturday",
+                            ].map((day, index) => (
+                              <label
+                                key={day}
+                                className="flex items-center text-sm"
+                              >
+                                <input
+                                  type="checkbox"
+                                  className="mr-1 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                                  checked={reportConfig.schedule.days.includes(
+                                    index
+                                  )}
+                                  onChange={(e) => {
+                                    const days = e.target.checked
+                                      ? [...reportConfig.schedule.days, index]
+                                      : reportConfig.schedule.days.filter(
+                                          (d) => d !== index
+                                        );
+                                    setReportConfig({
+                                      ...reportConfig,
+                                      schedule: {
+                                        ...reportConfig.schedule,
+                                        days,
+                                      },
+                                    });
+                                  }}
+                                />
+                                {day.substring(0, 3)}
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
               </div>
 
-              {/* Actions */}
-              <div className="flex items-center justify-end space-x-4 pt-4">
+              {/* Action Buttons */}
+              <div className="flex justify-end space-x-3 pt-4 border-t">
                 <button
                   onClick={() => setShowReportBuilder(false)}
-                  className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+                  className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
                 >
                   Cancel
                 </button>
                 <button
-                  onClick={handleCreateReport}
                   disabled={
                     !reportConfig.name ||
                     reportConfig.metrics.length === 0 ||
                     loading
                   }
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={handleCreateReport}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
                   {loading ? "Creating..." : "Create Report"}
                 </button>

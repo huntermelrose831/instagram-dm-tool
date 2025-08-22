@@ -6,6 +6,7 @@ const {
 } = require("./database/messaging");
 const { sendDMs } = require("./sendDMs");
 const accountsStore = require("./accountsStore");
+const logger = require("./utils/logger");
 
 // Instagram's general rate limits (customize these based on your needs)
 const RATE_LIMITS = {
@@ -21,7 +22,7 @@ const getRandomDelay = () => {
 // Process a single message with rate limiting
 const processSingleMessage = async (fromUsername, targetUsername, message) => {
   try {
-    console.log(`Sending DM from ${fromUsername} to ${targetUsername}`);
+    logger.debug(`Sending DM from ${fromUsername} to ${targetUsername}`);
     const result = await sendDMs({
       igUsername: fromUsername,
       usernames: [targetUsername],
@@ -36,9 +37,8 @@ const processSingleMessage = async (fromUsername, targetUsername, message) => {
       try {
         await updateDMCount(fromUsername);
       } catch (dmCountError) {
-        console.warn(
-          `Failed to update DM count for ${fromUsername}:`,
-          dmCountError.message
+        logger.warn(
+          `Failed to update DM count for ${fromUsername}: ${dmCountError.message}`
         );
         // Don't fail the message send because of DM count update failure
       }
@@ -46,7 +46,7 @@ const processSingleMessage = async (fromUsername, targetUsername, message) => {
 
     return messageWasSent;
   } catch (error) {
-    console.error(`Failed to send DM to ${targetUsername}:`, error.message);
+    logger.error(`Failed to send DM to ${targetUsername}: ${error.message}`);
     return false;
   }
 };
@@ -62,32 +62,18 @@ const processJob = async (job) => {
   } = job;
   let targets, messages;
 
-  console.log(`\n=== Processing job #${id} ===`);
-  console.log("Job details:", {
-    scheduledFor: schedule_time,
-    currentTime: new Date().toISOString(),
-    fromUser: from_username,
-    rawTargets: target_usernames,
-    rawMessages: message_variations,
-  }); // Verify account exists and has valid cookies
+  logger.debug(`Processing job #${id} from ${from_username}`);
+
+  // Verify account exists and has valid cookies
   // Remove @ prefix if present
   const cleanUsername = from_username.replace(/^@/, "");
 
-  // Add debug logging to see what accounts are available
+  // Check available accounts with minimal logging
   const allAccounts = accountsStore.loadAccounts();
-  console.log(
-    "Available accounts in JSON store:",
-    allAccounts.map((acc) => acc.username)
-  );
-
-  // Also check database accounts
   const { AccountsService } = require("./database");
   const dbAccounts = AccountsService.getAccounts();
-  console.log(
-    "Available accounts in database:",
-    dbAccounts.map((acc) => acc.username)
-  );
-  console.log(`Looking for account: ${cleanUsername}`);
+
+  logger.debug(`Looking for account: ${cleanUsername}`);
 
   // Try different variations of the username in JSON store first
   let account = accountsStore.getAccountByUsername(cleanUsername);
@@ -95,13 +81,13 @@ const processJob = async (job) => {
   if (!account) {
     // Try with @gmail.com suffix
     account = accountsStore.getAccountByUsername(`${cleanUsername}@gmail.com`);
-    console.log(`Trying with @gmail.com: ${cleanUsername}@gmail.com`);
+    logger.debug(`Trying with @gmail.com: ${cleanUsername}@gmail.com`);
   }
 
   if (!account) {
     // Try finding any account that starts with the username
     account = allAccounts.find((acc) => acc.username.startsWith(cleanUsername));
-    console.log(`Trying to find account starting with: ${cleanUsername}`);
+    logger.debug(`Trying to find account starting with: ${cleanUsername}`);
   }
 
   // If not found in JSON store, try database (but we need cookies for Instagram)
@@ -109,26 +95,22 @@ const processJob = async (job) => {
     const dbAccount = AccountsService.getAccountByUsername(cleanUsername);
     if (dbAccount && dbAccount.cookies) {
       account = dbAccount;
-      console.log(`Found account in database: ${dbAccount.username}`);
+      logger.debug(`Found account in database: ${dbAccount.username}`);
     }
   }
 
   if (!account) {
-    console.error(
+    logger.error(
       `Failed to find account for username: ${from_username} (cleaned: ${cleanUsername})`
     );
-    console.error(
-      "Available accounts (JSON):",
-      allAccounts.map((acc) => acc.username)
-    );
-    console.error(
-      "Available accounts (DB):",
-      dbAccounts.map((acc) => acc.username)
+    logger.error(
+      `Available accounts: ${[...allAccounts, ...dbAccounts].map((acc) => acc.username).join(", ")}`
     );
     await updateJobStatus(id, "failed");
     return 0;
   }
-  console.log(`Found account: ${account.username}`);
+
+  logger.debug(`Found account: ${account.username}`);
 
   try {
     targets = Array.isArray(target_usernames)
@@ -151,7 +133,7 @@ const processJob = async (job) => {
   let successCount = 0;
 
   try {
-    console.log(
+    logger.info(
       `Starting job #${id} for ${from_username} to send ${targets.length} messages`
     );
     await updateJobStatus(id, "running");
@@ -160,7 +142,7 @@ const processJob = async (job) => {
       try {
         // Pick a random message variation
         const message = messages[Math.floor(Math.random() * messages.length)];
-        console.log(`Sending message to ${target}`);
+        logger.debug(`Sending message to ${target}`);
         const success = await processSingleMessage(
           account.username,
           target,
@@ -169,17 +151,17 @@ const processJob = async (job) => {
 
         if (success) {
           successCount++;
-          console.log(`Successfully sent message to ${target}`);
+          logger.debug(`Successfully sent message to ${target}`);
         } else {
-          console.log(`Failed to send message to ${target}`);
+          logger.warn(`Failed to send message to ${target}`);
         }
 
         // Add random delay between messages
         const delay = getRandomDelay();
-        console.log(`Waiting ${delay / 1000} seconds before next message...`);
+        logger.debug(`Waiting ${delay / 1000} seconds before next message...`);
         await new Promise((resolve) => setTimeout(resolve, delay));
       } catch (targetError) {
-        console.error(`Error sending to ${target}:`, targetError);
+        logger.error(`Error sending to ${target}: ${targetError.message}`);
         // Continue with next target
       }
     }
@@ -190,8 +172,8 @@ const processJob = async (job) => {
           ? "completed" // Partial success - still mark as completed but log details
           : "failed";
     await updateJobStatus(id, status);
-    console.log(
-      `Job #${id} finished with status: ${status} (${successCount}/${targets.length} sent)${
+    logger.info(
+      `Job #${id} finished: ${status} (${successCount}/${targets.length} sent)${
         successCount > 0 && successCount < targets.length
           ? " - PARTIAL SUCCESS"
           : ""
@@ -199,7 +181,7 @@ const processJob = async (job) => {
     );
     return successCount;
   } catch (error) {
-    console.error(`Critical error in job #${id}:`, error);
+    logger.error(`Critical error in job #${id}: ${error.message}`);
     await updateJobStatus(id, "failed");
     return 0;
   }
@@ -210,13 +192,13 @@ const processJobWithTimeout = async (job, timeoutMs = 600000) => {
   // 10 minute timeout
   return new Promise(async (resolve, reject) => {
     const timeout = setTimeout(() => {
-      console.error(
+      logger.error(
         `Job #${job.id} timed out after ${timeoutMs / 1000} seconds`
       );
       try {
         updateJobStatus(job.id, "failed");
       } catch (err) {
-        console.error("Error updating job status after timeout:", err);
+        logger.error(`Error updating job status after timeout: ${err.message}`);
       }
       reject(
         new Error(`Job processing timed out after ${timeoutMs / 1000} seconds`)
@@ -237,44 +219,45 @@ const processJobWithTimeout = async (job, timeoutMs = 600000) => {
 // Check for pending jobs every minute
 const checkPendingJobs = async () => {
   const now = new Date();
-  console.log("\n--- Checking for pending jobs ---");
-  console.log("Current time (UTC):", now.toISOString());
-  console.log("Current time (local):", now.toLocaleString());
 
   try {
     const pendingJobs = await getPendingJobs();
-    console.log(`Found ${pendingJobs.length} pending jobs ready to execute`);
 
-    for (const job of pendingJobs) {
-      console.log("\n🚀 Executing scheduled job:", {
-        id: job.id,
-        scheduledTime: job.schedule_time,
-        fromUsername: job.from_username,
-        targetCount: Array.isArray(job.target_usernames)
-          ? job.target_usernames.length
-          : JSON.parse(job.target_usernames || "[]").length,
-      });
-      try {
-        await processJobWithTimeout(job);
-      } catch (jobError) {
-        console.error(`❌ Failed to process job ${job.id}:`, jobError.message);
-        // Ensure job status is updated to failed if not already done
+    // Only log when there are actual jobs to process
+    if (pendingJobs.length > 0) {
+      logger.logScheduler(
+        `Found ${pendingJobs.length} pending jobs ready to execute`
+      );
+
+      for (const job of pendingJobs) {
+        logger.info(
+          `🚀 Executing scheduled job #${job.id} from ${job.from_username}`
+        );
         try {
-          await updateJobStatus(job.id, "failed");
-        } catch (statusError) {
-          console.error(
-            `Failed to update job ${job.id} status to failed:`,
-            statusError.message
+          await processJobWithTimeout(job);
+        } catch (jobError) {
+          logger.error(
+            `❌ Failed to process job ${job.id}: ${jobError.message}`
           );
+          // Ensure job status is updated to failed if not already done
+          try {
+            await updateJobStatus(job.id, "failed");
+          } catch (statusError) {
+            logger.error(
+              `Failed to update job ${job.id} status to failed: ${statusError.message}`
+            );
+          }
         }
       }
-    }
-
-    if (pendingJobs.length === 0) {
-      console.log("✅ No jobs ready to execute at this time");
+    } else {
+      // Only log "no jobs" message every 10 minutes to reduce noise
+      const minute = now.getMinutes();
+      if (minute % 10 === 0) {
+        logger.debug("✅ No jobs ready to execute");
+      }
     }
   } catch (error) {
-    console.error("❌ Error processing scheduled jobs:", error);
+    logger.error("❌ Error processing scheduled jobs:", error);
   }
 };
 

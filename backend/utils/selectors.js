@@ -60,6 +60,41 @@ const SELECTORS = {
   NEWMESSAGEBUTTON: [
     'svg[aria-label="New message"]',
     'div[role="button"][aria-label="New message"]',
+    'button[aria-label="New message"]',
+    'a[aria-label="New message"]',
+    // Alternative text labels
+    'svg[aria-label="New Message"]',
+    'div[role="button"][aria-label="New Message"]',
+    'button[aria-label="New Message"]',
+    // Look for compose/new/create buttons in DM context
+    'svg[aria-label*="Compose"]',
+    'div[role="button"][aria-label*="Compose"]',
+    'svg[aria-label*="Create"]',
+    'div[role="button"][aria-label*="Create"]',
+    // Generic new message patterns
+    'button:has-text("New message")',
+    'button:has-text("New Message")',
+    'div[role="button"]:has-text("New message")',
+    'div[role="button"]:has-text("New Message")',
+    // SVG icon-based fallbacks (common Instagram patterns)
+    'svg[viewBox="0 0 24 24"] + span:has-text("New")',
+    'div[role="button"] svg[viewBox="0 0 24 24"]',
+    // Path-based selectors for common Instagram locations
+    'header div[role="button"] svg',
+    'div[data-testid*="new"] svg',
+    'div[data-testid*="compose"] svg',
+    // Broader fallbacks if rate limited
+    'div[role="button"][tabindex="0"]',
+    'button[type="button"]:not([disabled])',
+  ],
+
+  DIRECT_MESSAGING_LINK: [
+    'a[aria-label="Direct messaging - 0 new notifications link"]',
+    'a[aria-label*="Direct messaging"]',
+    'a[aria-label*="Messenger"]',
+    'a[href="/direct/inbox/"]',
+    'svg[aria-label="Messenger"]',
+    'svg[aria-label="Direct"]',
   ],
 };
 

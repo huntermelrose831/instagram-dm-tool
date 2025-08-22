@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react";
 
 // https://vite.dev/config/
 export default defineConfig({
-  base: '/',
+  base: process.env.NODE_ENV === "production" ? "/app/" : "/",
   plugins: [react()],
   server: {
     proxy: {
@@ -13,5 +13,11 @@ export default defineConfig({
         secure: false,
       },
     },
+  },
+  build: {
+    outDir: "dist",
+    assetsDir: "assets",
+    sourcemap: false,
+    minify: "terser",
   },
 });

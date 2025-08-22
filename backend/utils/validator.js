@@ -20,15 +20,26 @@ const schemas = {
 
   // DM schemas
   sendDM: Joi.object({
-    username: Joi.string().required(),
-    usernames: Joi.array().items(Joi.string()).min(1).required(),
-    message: Joi.string().when("messageVariations", {
-      is: Joi.array().length(0).required(),
-      then: Joi.string().required(),
-      otherwise: Joi.string().allow("", null),
-    }),
-    messageVariations: Joi.array().items(Joi.string()),
-    scheduled: Joi.boolean(),
+    username: Joi.string()
+      .regex(/^[A-Za-z0-9._]{1,30}$/)
+      .required(),
+    usernames: Joi.array()
+      .items(Joi.string().regex(/^[A-Za-z0-9._]{1,30}$/))
+      .min(1)
+      .max(50)
+      .required(),
+    message: Joi.string()
+      .max(800)
+      .when("messageVariations", {
+        is: Joi.array().length(0).required(),
+        then: Joi.string().required(),
+        otherwise: Joi.string().allow("", null),
+      }),
+    messageVariations: Joi.array()
+      .items(Joi.string().max(800))
+      .max(10)
+      .default([]),
+    scheduled: Joi.boolean().default(false),
     scheduleTime: Joi.string().when("scheduled", {
       is: true,
       then: Joi.string().required(),
@@ -37,14 +48,26 @@ const schemas = {
 
   // Schedule schemas
   scheduleDM: Joi.object({
-    fromUsername: Joi.string().required(),
-    targetUsernames: Joi.array().items(Joi.string()).min(1).required(),
-    messageVariations: Joi.array().items(Joi.string()).min(1).required(),
+    fromUsername: Joi.string()
+      .regex(/^[A-Za-z0-9._]{1,30}$/)
+      .required(),
+    targetUsernames: Joi.array()
+      .items(Joi.string().regex(/^[A-Za-z0-9._]{1,30}$/))
+      .min(1)
+      .max(200)
+      .required(),
+    messageVariations: Joi.array()
+      .items(Joi.string().max(800))
+      .min(1)
+      .max(10)
+      .required(),
     scheduleTime: Joi.string().required(),
     isRecurring: Joi.boolean().required(),
     recurringInterval: Joi.when("isRecurring", {
       is: true,
-      then: Joi.string().required(),
+      then: Joi.string()
+        .valid("hourly", "daily", "weekly", "monthly")
+        .required(),
       otherwise: Joi.allow(null),
     }),
   }),

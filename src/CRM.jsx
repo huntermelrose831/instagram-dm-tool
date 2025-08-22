@@ -119,7 +119,7 @@ const CRM = () => {
   const updateContactStatus = async (contactId, newStatus) => {
     try {
       const response = await fetch(`/api/crm/contacts/${contactId}`, {
-        method: "PUT",
+        method: "PATCH", // changed from PUT to PATCH
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: newStatus }),
       });
@@ -132,6 +132,27 @@ const CRM = () => {
       }
     } catch (error) {
       console.error("Failed to update contact:", error);
+    }
+  };
+
+  // Delete a contact
+  const deleteContact = async (contactId) => {
+    if (!contactId) return;
+    const confirmDelete = window.confirm("Delete this contact permanently?");
+    if (!confirmDelete) return;
+    try {
+      const response = await fetch(`/api/crm/contacts/${contactId}`, {
+        method: "DELETE",
+      });
+      if (response.ok) {
+        setContacts((prev) => prev.filter((c) => c.id !== contactId));
+        if (selectedContact?.id === contactId) setSelectedContact(null);
+      } else {
+        const data = await response.json().catch(() => ({}));
+        console.error("Failed to delete contact", data.message);
+      }
+    } catch (err) {
+      console.error("Error deleting contact:", err);
     }
   };
 
@@ -336,6 +357,12 @@ const CRM = () => {
                       @{selectedContact.username}
                     </h3>
                     <p className="text-gray-600">{selectedContact.email}</p>
+                    <button
+                      onClick={() => deleteContact(selectedContact.id)}
+                      className="mt-4 inline-flex items-center px-3 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg shadow transition-colors"
+                    >
+                      <FaTrash className="mr-2" /> Delete Contact
+                    </button>
                   </div>
 
                   {/* Status Update */}

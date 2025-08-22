@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "format": "prettier --write \"src/**/*.{js,jsx}\"",
-    "analyze": "vite build --mode analyze"
+    "analyze": "vite build --mode analyze",
+    "start:prod": "LOG_LEVEL=warn NODE_ENV=production npm run dev"
   },
   "dependencies": {
     "apify-client": "^2.12.4",

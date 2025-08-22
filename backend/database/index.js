@@ -6,6 +6,7 @@ const AccountsService = require("./accounts");
 const ScrapingService = require("./scraping");
 const ProxyService = require("./proxies");
 const { RateLimitService } = require("./ratelimits");
+const ReportsService = require("./reports");
 
 module.exports = {
   db,
@@ -16,4 +17,5 @@ module.exports = {
   ScrapingService,
   ProxyService,
   RateLimitService,
+  ReportsService,
 };

@@ -1,0 +1,133 @@
+{
+  "info": {
+    "_postman_id": "instagram-dm-tool-collection-2025",
+    "name": "Instagram DM Tool API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Test all endpoints for Instagram DM Tool backend."
+  },
+  "item": [
+    {
+      "name": "Send DMs Progress",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "x-api-key", "value": "mutatekey123" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"your_instagram_username\",\n  \"usernames\": [\"targetuser1\"],\n  \"message\": \"Hello!\",\n  \"messageVariations\": [\"Hello!\"]\n}"
+        },
+        "url": {
+          "raw": "http://localhost:5000/api/send-dms-progress",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "5000",
+          "path": ["api", "send-dms-progress"]
+        }
+      }
+    },
+    {
+      "name": "Send DMs",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "x-api-key", "value": "mutatekey123" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"your_instagram_username\",\n  \"usernames\": [\"targetuser1\"],\n  \"message\": \"Hello!\",\n  \"scheduled\": false,\n  \"messageVariations\": [\"Hello!\"]\n}"
+        },
+        "url": {
+          "raw": "http://localhost:5000/api/send-dms",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "5000",
+          "path": ["api", "send-dms"]
+        }
+      }
+    },
+    {
+      "name": "Schedule DMs",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "x-api-key", "value": "mutatekey123" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"fromUsername\": \"your_instagram_username\",\n  \"targetUsernames\": [\"targetuser1\"],\n  \"messageVariations\": [\"Hello!\"],\n  \"scheduleTime\": \"2025-08-21T15:00:00.000Z\",\n  \"isRecurring\": false,\n  \"recurringInterval\": null\n}"
+        },
+        "url": {
+          "raw": "http://localhost:5000/api/schedule-dms",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "5000",
+          "path": ["api", "schedule-dms"]
+        }
+      }
+    },
+    {
+      "name": "Get Accounts",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:5000/api/accounts",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "5000",
+          "path": ["api", "accounts"]
+        }
+      }
+    },
+    {
+      "name": "Get Scheduled Jobs",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:5000/api/scheduled-jobs",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "5000",
+          "path": ["api", "scheduled-jobs"]
+        }
+      }
+    },
+    {
+      "name": "Add Account",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"your_instagram_username\",\n  \"password\": \"your_password\"\n}"
+        },
+        "url": {
+          "raw": "http://localhost:5000/api/add-account",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "5000",
+          "path": ["api", "add-account"]
+        }
+      }
+    },
+    {
+      "name": "Get DM Stats",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:5000/api/dm-stats/your_instagram_username",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "5000",
+          "path": ["api", "dm-stats", "your_instagram_username"]
+        }
+      }
+    }
+  ]
+}

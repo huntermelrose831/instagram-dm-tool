@@ -34,19 +34,13 @@ function addScheduledJob({
     const pad = (num) => String(num).padStart(2, "0");
     sqliteDateTime = `${year}-${pad(month)}-${pad(day)} ${pad(hours)}:${pad(minutes)}:00`;
 
-    console.log("TIMEZONE DEBUG - Parsed datetime-local as LOCAL time:", {
-      input: scheduleTime,
-      parsedDate: scheduleDate.toString(),
-      parsedYear: year,
-      parsedMonth: month,
-      parsedDay: day,
-      parsedHours: hours,
-      parsedMinutes: minutes,
-      sqliteFormat: sqliteDateTime,
-      // Show what toISOString() would give (for comparison)
-      isoStringWouldBe: scheduleDate.toISOString(),
-      timezoneOffset: scheduleDate.getTimezoneOffset(),
-    });
+    // Only log timezone debug info in debug mode
+    if (process.env.LOG_LEVEL === "debug") {
+      console.log("TIMEZONE DEBUG - Parsed datetime-local as LOCAL time:", {
+        input: scheduleTime,
+        sqliteFormat: sqliteDateTime,
+      });
+    }
   } else {
     // Fallback for other formats
     scheduleDate = new Date(scheduleTime);
@@ -83,11 +77,14 @@ function addScheduledJob({
       recurringInterval
     );
 
-    console.log("TIMEZONE DEBUG - Successfully stored in database:", {
-      jobId: result.lastInsertRowid,
-      storedDateTime: sqliteDateTime,
-      originalInput: scheduleTime,
-    });
+    // Only log storage debug info in debug mode
+    if (process.env.LOG_LEVEL === "debug") {
+      console.log("TIMEZONE DEBUG - Successfully stored in database:", {
+        jobId: result.lastInsertRowid,
+        storedDateTime: sqliteDateTime,
+        originalInput: scheduleTime,
+      });
+    }
     return result.lastInsertRowid;
   } catch (error) {
     console.error("Error adding scheduled job:", error);
@@ -308,8 +305,6 @@ const updateDMCount = updateDMRateLimits;
 
 function getPendingJobs() {
   const now = new Date();
-  console.log("Querying for pending jobs at:", now.toISOString());
-  console.log("Local time:", now.toLocaleString());
 
   // TIMEZONE FIX: Format current time as local time string for comparison
   // This matches the format we use when storing: 'YYYY-MM-DD HH:MM:SS'
@@ -322,14 +317,6 @@ function getPendingJobs() {
   const pad = (num) => String(num).padStart(2, "0");
   const currentLocalTime = `${year}-${pad(month)}-${pad(day)} ${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
 
-  console.log("Current local time for comparison:", currentLocalTime);
-
-  // First, let's see all jobs to debug
-  const allJobs = db
-    .prepare(`SELECT id, schedule_time, status FROM scheduled_jobs`)
-    .all();
-  console.log("All jobs in database:", allJobs);
-
   // CRITICAL FIX: Compare local time strings directly instead of using unixepoch()
   // Since we store schedule_time as local time strings, we need to compare with local time
   const stmt = db.prepare(`
@@ -341,15 +328,6 @@ function getPendingJobs() {
   `);
 
   const jobs = stmt.all(currentLocalTime);
-  console.log("TIMEZONE DEBUG - Jobs ready to execute:", {
-    currentTime: currentLocalTime,
-    jobsFound: jobs.length,
-    jobs: jobs.map((j) => ({
-      id: j.id,
-      schedule_time: j.schedule_time,
-      from_username: j.from_username,
-    })),
-  });
 
   return jobs.map((job) => ({
     ...job,
