@@ -1,289 +1,382 @@
 // Database service for leads management
-const db = require("./db");
+const { db, initializeDatabase } = require("./db");
+const logger = require("../utils/logger");
+
+const init = async () => {
+  try {
+    await initializeDatabase();
+
+    // Create indexes after ensuring tables exist
+    const indexes = [
+      `CREATE INDEX IF NOT EXISTS idx_leads_username ON leads(username)`,
+      `CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status)`,
+      `CREATE INDEX IF NOT EXISTS idx_leads_source ON leads(source)`,
+      `CREATE INDEX IF NOT EXISTS idx_leads_created_at ON leads(created_at DESC)`,
+      `CREATE INDEX IF NOT EXISTS idx_leads_is_target ON leads(is_target)`,
+    ];
+
+    for (const indexSql of indexes) {
+      await new Promise((resolve, reject) => {
+        db.run(indexSql, (err) => {
+          if (err) {
+            logger.error("Index creation failed:", err);
+            reject(err);
+          } else {
+            resolve();
+          }
+        });
+      });
+    }
+
+    logger.info("Leads table initialized");
+  } catch (error) {
+    logger.error("Error initializing leads table:", error);
+  }
+};
 
 class LeadsService {
-  // Create a new lead
-  static createLead(leadData) {
-    const stmt = db.prepare(`
-      INSERT INTO leads (
-        username, full_name, followers_count, following_count, posts_count,
-        engagement_rate, location, bio, is_verified, has_profile_pic, has_website,
-        tags, source, source_details, scraping_job_id, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+  static async createLead(leadData) {
+    return new Promise((resolve, reject) => {
+      try {
+        const stmt = db.prepare(`
+          INSERT INTO leads (
+            username, full_name, profile_url, status, source, is_target
+          ) VALUES (?, ?, ?, ?, ?, ?)
+        `);
 
-    const info = stmt.run(
-      leadData.username,
-      leadData.fullName || null,
-      leadData.followers || null,
-      leadData.following || null,
-      leadData.posts || null,
-      leadData.engagementRate || null,
-      leadData.location || null,
-      leadData.bio || null,
-      leadData.isVerified || 0,
-      leadData.hasProfilePic || 1,
-      leadData.hasWebsite || 0,
-      JSON.stringify(leadData.tags || []),
-      leadData.source || "manual",
-      leadData.sourceDetails || null,
-      leadData.scrapingJobId || null,
-      leadData.status || "new"
-    );
-
-    return info.lastInsertRowid;
-  }
-
-  // Get all leads with filtering
-  static getLeads(filters = {}) {
-    let query = "SELECT * FROM leads WHERE 1=1";
-    const params = [];
-
-    if (filters.status) {
-      query += " AND status = ?";
-      params.push(filters.status);
-    }
-
-    if (filters.source) {
-      query += " AND source = ?";
-      params.push(filters.source);
-    }
-
-    if (filters.minFollowers) {
-      query += " AND followers_count >= ?";
-      params.push(filters.minFollowers);
-    }
-
-    if (filters.maxFollowers) {
-      query += " AND followers_count <= ?";
-      params.push(filters.maxFollowers);
-    }
-
-    if (filters.search) {
-      query += " AND (username LIKE ? OR full_name LIKE ?)";
-      params.push(`%${filters.search}%`, `%${filters.search}%`);
-    }
-
-    query += " ORDER BY created_at DESC";
-
-    if (filters.limit) {
-      query += " LIMIT ?";
-      params.push(filters.limit);
-    }
-
-    const stmt = db.prepare(query);
-    const leads = stmt.all(...params);
-
-    return leads.map((lead) => ({
-      ...lead,
-      tags: JSON.parse(lead.tags || "[]"),
-      isVerified: !!lead.is_verified,
-      hasProfilePic: !!lead.has_profile_pic,
-      hasWebsite: !!lead.has_website,
-      addedToTargets: !!lead.added_to_targets,
-    }));
-  }
-
-  // Update lead status
-  static updateLeadStatus(id, status) {
-    const stmt = db.prepare(
-      "UPDATE leads SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
-    );
-    const info = stmt.run(status, id);
-    return info.changes > 0;
-  }
-
-  // Mark lead as added to targets
-  static markAsAddedToTargets(username) {
-    const stmt = db.prepare(
-      "UPDATE leads SET added_to_targets = 1, updated_at = CURRENT_TIMESTAMP WHERE username = ?"
-    );
-    const info = stmt.run(username);
-    return info.changes > 0;
-  }
-
-  // Get leads by scraping job
-  static getLeadsByScrapingJob(jobId) {
-    const stmt = db.prepare(
-      "SELECT * FROM leads WHERE scraping_job_id = ? ORDER BY created_at DESC"
-    );
-    const leads = stmt.all(jobId);
-
-    return leads.map((lead) => ({
-      ...lead,
-      tags: JSON.parse(lead.tags || "[]"),
-      isVerified: !!lead.is_verified,
-      hasProfilePic: !!lead.has_profile_pic,
-      hasWebsite: !!lead.has_website,
-    }));
-  }
-
-  // Delete lead
-  static deleteLead(id) {
-    const stmt = db.prepare("DELETE FROM leads WHERE id = ?");
-    const info = stmt.run(id);
-    return info.changes > 0;
-  }
-
-  // Get lead statistics
-  static getLeadStats() {
-    const stmt = db.prepare(`
-      SELECT 
-        COUNT(*) as total,
-        SUM(CASE WHEN status = 'new' THEN 1 ELSE 0 END) as new_leads,
-        SUM(CASE WHEN status = 'contacted' THEN 1 ELSE 0 END) as contacted,
-        SUM(CASE WHEN status = 'responded' THEN 1 ELSE 0 END) as responded,
-        SUM(CASE WHEN status = 'converted' THEN 1 ELSE 0 END) as converted,
-        SUM(CASE WHEN added_to_targets = 1 THEN 1 ELSE 0 END) as added_to_targets
-      FROM leads
-    `);
-
-    return stmt.get();
-  }
-
-  // Bulk insert leads (for scraping jobs)
-  static bulkInsertLeads(leadsArray) {
-    const stmt = db.prepare(`
-      INSERT OR IGNORE INTO leads (
-        username, full_name, followers_count, following_count, posts_count,
-        engagement_rate, location, bio, is_verified, has_profile_pic, has_website,
-        tags, source, source_details, scraping_job_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    const insertMany = db.transaction((leads) => {
-      for (const lead of leads) {
         stmt.run(
-          lead.username,
-          lead.fullName || null,
-          lead.followers || null,
-          lead.following || null,
-          lead.posts || null,
-          lead.engagementRate || null,
-          lead.location || null,
-          lead.bio || null,
-          lead.isVerified || 0,
-          lead.hasProfilePic || 1,
-          lead.hasWebsite || 0,
-          JSON.stringify(lead.tags || []),
-          lead.source || "scraping",
-          lead.sourceDetails || null,
-          lead.scrapingJobId || null
+          leadData.username,
+          leadData.fullName || null,
+          leadData.profileUrl || `https://instagram.com/${leadData.username}`,
+          leadData.status || "new",
+          leadData.source || "manual",
+          leadData.is_target || leadData.isTarget ? 1 : 0,
+          function (err) {
+            if (err) {
+              console.error("Error creating lead:", err);
+              reject(err);
+            } else {
+              resolve(this.lastID);
+            }
+          }
         );
+      } catch (error) {
+        console.error("Error creating lead:", error);
+        reject(error);
       }
     });
+  }
 
-    insertMany(leadsArray);
-    return leadsArray.length;
+  // Create lead with duplicate handling (ignore if username already exists)
+  static async createLeadOrIgnore(leadData) {
+    return new Promise((resolve, reject) => {
+      try {
+        const stmt = db.prepare(`
+          INSERT OR IGNORE INTO leads (
+            username, full_name, profile_url, status, source, is_target
+          ) VALUES (?, ?, ?, ?, ?, ?)
+        `);
+
+        stmt.run(
+          leadData.username,
+          leadData.fullName || null,
+          leadData.profileUrl || `https://instagram.com/${leadData.username}`,
+          leadData.status || "new",
+          leadData.source || "manual",
+          leadData.is_target || leadData.isTarget ? 1 : 0,
+          function (err) {
+            if (err) {
+              console.error("Error creating lead:", err);
+              reject(err);
+            } else {
+              // this.lastID will be 0 if the insert was ignored due to duplicate
+              resolve({
+                lastID: this.lastID,
+                changes: this.changes,
+                inserted: this.changes > 0,
+              });
+            }
+          }
+        );
+      } catch (error) {
+        console.error("Error creating lead:", error);
+        reject(error);
+      }
+    });
+  }
+
+  static async getLeads(filters = {}) {
+    return new Promise((resolve, reject) => {
+      try {
+        let query = "SELECT * FROM leads WHERE 1=1";
+        let params = [];
+
+        if (filters.status) {
+          query += " AND status = ?";
+          params.push(filters.status);
+        }
+
+        if (filters.source) {
+          query += " AND source = ?";
+          params.push(filters.source);
+        }
+
+        if (filters.minFollowers) {
+          query += " AND 1=1"; // Remove follower filtering since column doesn't exist
+          // params.push(filters.minFollowers);
+        }
+
+        if (filters.maxFollowers) {
+          query += " AND 1=1"; // Remove follower filtering since column doesn't exist
+          // params.push(filters.maxFollowers);
+        }
+
+        if (filters.search) {
+          query += " AND (username LIKE ? OR full_name LIKE ?)";
+          const searchTerm = `%${filters.search}%`;
+          params.push(searchTerm, searchTerm);
+        }
+
+        query += " ORDER BY created_at DESC";
+
+        if (filters.limit) {
+          query += " LIMIT ?";
+          params.push(filters.limit);
+        }
+
+        db.all(query, params, (err, rows) => {
+          if (err) {
+            reject(err);
+            return;
+          }
+
+          const leads = rows.map((lead) => ({
+            ...lead,
+            id: lead.id,
+            isVerified: Boolean(lead.is_verified),
+            hasProfilePic: Boolean(lead.has_profile_pic),
+            hasWebsite: Boolean(lead.has_website),
+            addedToTargets: Boolean(lead.added_to_targets),
+            isTarget: Boolean(lead.is_target),
+            tags: lead.tags ? JSON.parse(lead.tags) : [],
+          }));
+
+          resolve(leads);
+        });
+      } catch (error) {
+        console.error("Error getting leads:", error);
+        reject(error);
+      }
+    });
   }
 
   // Get lead by username
-  static getLeadByUsername(username) {
-    const stmt = db.prepare(`
-      SELECT * FROM leads 
-      WHERE username = ?
-    `);
-    return stmt.get(username);
-  }
+  static async getLeadByUsername(username) {
+    return new Promise((resolve, reject) => {
+      try {
+        db.get(
+          "SELECT * FROM leads WHERE username = ?",
+          [username],
+          (err, row) => {
+            if (err) {
+              reject(err);
+              return;
+            }
 
-  // Add/create a lead (alias for createLead with simpler interface)
-  static addLead(leadData) {
-    try {
-      return this.createLead(leadData);
-    } catch (error) {
-      // If lead already exists, return existing lead
-      if (error.message.includes("UNIQUE constraint failed")) {
-        return this.getLeadByUsername(leadData.username);
+            if (row) {
+              const lead = {
+                ...row,
+                id: row.id,
+                isVerified: Boolean(row.is_verified),
+                hasProfilePic: Boolean(row.has_profile_pic),
+                hasWebsite: Boolean(row.has_website),
+                addedToTargets: Boolean(row.added_to_targets),
+                isTarget: Boolean(row.is_target),
+                tags: row.tags ? JSON.parse(row.tags) : [],
+              };
+              resolve(lead);
+            } else {
+              resolve(null);
+            }
+          }
+        );
+      } catch (error) {
+        console.error("Error getting lead by username:", error);
+        reject(error);
       }
-      throw error;
-    }
+    });
   }
 
-  // Update a lead
-  static updateLead(id, updateData) {
-    const fields = [];
-    const values = [];
+  // Update lead
+  static async updateLead(leadId, updateData) {
+    return new Promise((resolve, reject) => {
+      try {
+        let setParts = ["updated_at = CURRENT_TIMESTAMP"];
+        let params = [];
 
-    // Build dynamic update query based on provided fields
-    if (updateData.fullName !== undefined) {
-      fields.push("full_name = ?");
-      values.push(updateData.fullName);
-    }
-    if (updateData.followers !== undefined) {
-      fields.push("followers_count = ?");
-      values.push(updateData.followers);
-    }
-    if (updateData.following !== undefined) {
-      fields.push("following_count = ?");
-      values.push(updateData.following);
-    }
-    if (updateData.posts !== undefined) {
-      fields.push("posts_count = ?");
-      values.push(updateData.posts);
-    }
-    if (updateData.engagementRate !== undefined) {
-      fields.push("engagement_rate = ?");
-      values.push(updateData.engagementRate);
-    }
-    if (updateData.location !== undefined) {
-      fields.push("location = ?");
-      values.push(updateData.location);
-    }
-    if (updateData.bio !== undefined) {
-      fields.push("bio = ?");
-      values.push(updateData.bio);
-    }
-    if (updateData.isVerified !== undefined) {
-      fields.push("is_verified = ?");
-      values.push(updateData.isVerified ? 1 : 0);
-    }
-    if (updateData.hasProfilePic !== undefined) {
-      fields.push("has_profile_pic = ?");
-      values.push(updateData.hasProfilePic ? 1 : 0);
-    }
-    if (updateData.hasWebsite !== undefined) {
-      fields.push("has_website = ?");
-      values.push(updateData.hasWebsite ? 1 : 0);
-    }
-    if (updateData.tags !== undefined) {
-      fields.push("tags = ?");
-      values.push(JSON.stringify(updateData.tags));
-    }
-    if (updateData.status !== undefined) {
-      fields.push("status = ?");
-      values.push(updateData.status);
-    }
-    if (updateData.isTarget !== undefined) {
-      fields.push("is_target = ?");
-      values.push(updateData.isTarget ? 1 : 0);
-    }
+        // Map frontend field names to database field names
+        if (updateData.isTarget !== undefined) {
+          setParts.push("is_target = ?");
+          params.push(updateData.isTarget ? 1 : 0);
+        }
 
-    if (fields.length === 0) {
-      return false; // No fields to update
-    }
+        if (updateData.addedToTargets !== undefined) {
+          setParts.push("added_to_targets = ?");
+          params.push(updateData.addedToTargets ? 1 : 0);
+        }
 
-    // Add updated_at timestamp
-    fields.push("updated_at = CURRENT_TIMESTAMP");
-    values.push(id);
+        if (updateData.status !== undefined) {
+          setParts.push("status = ?");
+          params.push(updateData.status);
+        }
 
-    const stmt = db.prepare(`
-      UPDATE leads 
-      SET ${fields.join(", ")}
-      WHERE id = ?
-    `);
+        if (updateData.tags !== undefined) {
+          setParts.push("tags = ?");
+          params.push(JSON.stringify(updateData.tags));
+        }
 
-    const result = stmt.run(...values);
-    return result.changes > 0;
+        params.push(leadId);
+
+        const query = `UPDATE leads SET ${setParts.join(", ")} WHERE id = ?`;
+
+        db.run(query, params, function (err) {
+          if (err) {
+            reject(err);
+            return;
+          }
+          resolve(this.changes > 0);
+        });
+      } catch (error) {
+        console.error("Error updating lead:", error);
+        reject(error);
+      }
+    });
   }
 
-  // Get scraped leads (alias for getLeads with source filter)
-  static getScrapedLeads(filters = {}) {
-    // Default to scraped leads only unless explicitly requesting all
+  // Update all leads with certain criteria
+  static async updateAllLeads(updateData, filter = {}) {
+    return new Promise((resolve, reject) => {
+      try {
+        let setParts = ["updated_at = CURRENT_TIMESTAMP"];
+        let params = [];
+
+        // Map frontend field names to database field names
+        if (updateData.isTarget !== undefined) {
+          setParts.push("is_target = ?");
+          params.push(updateData.isTarget ? 1 : 0);
+        }
+
+        if (updateData.addedToTargets !== undefined) {
+          setParts.push("added_to_targets = ?");
+          params.push(updateData.addedToTargets ? 1 : 0);
+        }
+
+        if (updateData.status !== undefined) {
+          setParts.push("status = ?");
+          params.push(updateData.status);
+        }
+
+        let whereClause = "WHERE 1=1";
+        if (filter.status) {
+          whereClause += " AND status = ?";
+          params.push(filter.status);
+        }
+
+        const query = `UPDATE leads SET ${setParts.join(", ")} ${whereClause}`;
+
+        db.run(query, params, function (err) {
+          if (err) {
+            reject(err);
+            return;
+          }
+          resolve(this.changes);
+        });
+      } catch (error) {
+        console.error("Error updating all leads:", error);
+        reject(error);
+      }
+    });
+  }
+
+  // Delete lead
+  static async deleteLead(leadId) {
+    return new Promise((resolve, reject) => {
+      try {
+        db.run("DELETE FROM leads WHERE id = ?", [leadId], function (err) {
+          if (err) {
+            reject(err);
+            return;
+          }
+          resolve(this.changes > 0);
+        });
+      } catch (error) {
+        console.error("Error deleting lead:", error);
+        reject(error);
+      }
+    });
+  }
+
+  static async getScrapedLeads(filters = {}) {
     if (!filters.source) {
       filters.source = "scraping";
     }
     return this.getLeads(filters);
   }
+
+  // Batch insert leads
+  static async batchInsertLeads(leadsArray) {
+    return new Promise((resolve, reject) => {
+      try {
+        const stmt = db.prepare(`
+          INSERT OR IGNORE INTO leads (
+            username, full_name, profile_url, status, source, is_target
+          ) VALUES (?, ?, ?, ?, ?, ?)
+        `);
+
+        let insertedCount = 0;
+
+        db.serialize(() => {
+          db.run("BEGIN TRANSACTION");
+
+          leadsArray.forEach((leadData) => {
+            try {
+              const result = stmt.run(
+                leadData.username,
+                leadData.fullName || null,
+                leadData.profileUrl ||
+                  `https://instagram.com/${leadData.username}`,
+                leadData.status || "new",
+                leadData.source || "manual",
+                leadData.is_target || leadData.isTarget ? 1 : 0
+              );
+              if (result.changes > 0) insertedCount++;
+            } catch (error) {
+              console.warn(
+                `Failed to insert lead ${leadData.username}:`,
+                error.message
+              );
+            }
+          });
+
+          db.run("COMMIT", (err) => {
+            if (err) {
+              reject(err);
+            } else {
+              resolve({ insertedCount, totalCount: leadsArray.length });
+            }
+          });
+        });
+      } catch (error) {
+        console.error("Error batch inserting leads:", error);
+        reject(error);
+      }
+    });
+  }
 }
+
+// Initialize on module load
+init().catch((err) => {
+  logger.error("Failed to initialize leads:", err);
+});
 
 module.exports = LeadsService;

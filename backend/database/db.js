@@ -1,109 +1,117 @@
-const Database = require("better-sqlite3");
+const sqlite3 = require("sqlite3").verbose();
 const path = require("path");
 const fs = require("fs");
 const logger = require("../utils/logger");
 
-// Determine database path - allowing for custom path in production
-const dbPath = process.env.DB_PATH || path.join(__dirname, "dmautomation.db");
-const dbDir = path.dirname(dbPath);
+// Database file path - use DATA_DIR if provided, otherwise use current working directory
+const dataDir = process.env.DATA_DIR || path.join(process.cwd(), "data");
+const dbPath = path.join(dataDir, "instagram-dm-tool.db");
 
-// Ensure database directory exists
-if (!fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
+// Ensure data directory exists
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
 }
 
-// Initialize database connection with proper error handling
-let db;
-try {
-  db = new Database(dbPath, {
-    verbose: process.env.NODE_ENV === "development" ? console.log : undefined,
-    fileMustExist: false, // Allow creating new DB if it doesn't exist
+// Initialize SQLite database
+let db = null;
+let isInitialized = false;
+
+const initializeDatabase = () => {
+  if (isInitialized) return Promise.resolve();
+
+  return new Promise((resolve, reject) => {
+    db = new sqlite3.Database(dbPath, (err) => {
+      if (err) {
+        logger.error("Database initialization failed:", err);
+        reject(err);
+        return;
+      }
+
+      // Create tables synchronously to ensure proper order
+      const tables = [
+        `CREATE TABLE IF NOT EXISTS accounts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          username TEXT UNIQUE,
+          email TEXT,
+          password TEXT,
+          cookies TEXT,
+          status TEXT DEFAULT 'active',
+          last_login DATETIME,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )`,
+        `CREATE TABLE IF NOT EXISTS leads (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          username TEXT UNIQUE,
+          full_name TEXT,
+          profile_url TEXT,
+          status TEXT DEFAULT 'new',
+          source TEXT,
+          is_target BOOLEAN DEFAULT 0,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )`,
+        `CREATE TABLE IF NOT EXISTS messages (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          lead_id INTEGER,
+          content TEXT,
+          status TEXT DEFAULT 'pending',
+          sent_at DATETIME,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (lead_id) REFERENCES leads (id)
+        )`,
+        `CREATE TABLE IF NOT EXISTS scheduled_jobs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          type TEXT,
+          data TEXT,
+          scheduled_at DATETIME,
+          status TEXT DEFAULT 'pending',
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )`,
+        `CREATE TABLE IF NOT EXISTS targets (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          username TEXT UNIQUE NOT NULL,
+          source TEXT DEFAULT 'manual',
+          is_target BOOLEAN DEFAULT 1,
+          added_to_targets BOOLEAN DEFAULT 1,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )`,
+      ];
+
+      // Create tables synchronously in series to avoid race conditions
+      let completed = 0;
+      const total = tables.length;
+
+      tables.forEach((sql, index) => {
+        db.run(sql, (err) => {
+          if (err) {
+            logger.error(`Table creation failed for table ${index}:`, err);
+            reject(err);
+            return;
+          }
+
+          completed++;
+          if (completed === total) {
+            isInitialized = true;
+            logger.info("Database initialized successfully");
+            resolve();
+          }
+        });
+      });
+    });
   });
-
-  // Enable foreign keys and optimize settings
-  db.pragma("foreign_keys = ON");
-  db.pragma("journal_mode = WAL");
-  db.pragma("synchronous = NORMAL");
-
-  // Set busy timeout to prevent SQLITE_BUSY errors
-  db.pragma("busy_timeout = 5000");
-
-  logger.info("✅ Database connection established successfully");
-
-  // Check if we need to initialize the database schema
-  const tableCount = db
-    .prepare("SELECT count(*) as count FROM sqlite_master WHERE type='table'")
-    .get().count;
-  if (tableCount === 0) {
-    logger.info("Initializing new database schema...");
-
-    // Read and execute schema creation SQL
-    const schemaPath = path.join(__dirname, "schema.sql");
-    if (fs.existsSync(schemaPath)) {
-      const schemaSql = fs.readFileSync(schemaPath, "utf8");
-      db.exec(schemaSql);
-      logger.info("Database schema initialized successfully");
-    } else {
-      logger.warn("Schema file not found at:", schemaPath);
-    }
-  }
-} catch (err) {
-  logger.error(`Database connection error: ${err.message}`);
-  throw new Error(`Failed to connect to database: ${err.message}`);
-}
-
-// Create a wrapper with improved error handling for database operations
-const safeDb = {
-  prepare: (sql) => {
-    try {
-      return db.prepare(sql);
-    } catch (err) {
-      logger.error(`SQL preparation error: ${err.message}, SQL: ${sql}`);
-      throw err;
-    }
-  },
-  exec: (sql) => {
-    try {
-      return db.exec(sql);
-    } catch (err) {
-      logger.error(`SQL execution error: ${err.message}, SQL: ${sql}`);
-      throw err;
-    }
-  },
-  transaction: (fn) => {
-    try {
-      return db.transaction(fn);
-    } catch (err) {
-      logger.error(`Transaction error: ${err.message}`);
-      throw err;
-    }
-  },
-  pragma: (pragmaStatement) => {
-    try {
-      return db.pragma(pragmaStatement);
-    } catch (err) {
-      logger.error(
-        `Pragma error: ${err.message}, Statement: ${pragmaStatement}`
-      );
-      throw err;
-    }
-  },
-  backup: (filename) => {
-    try {
-      return db.backup(filename);
-    } catch (err) {
-      logger.error(`Backup error: ${err.message}, File: ${filename}`);
-      throw err;
-    }
-  },
-  close: () => {
-    try {
-      return db.close();
-    } catch (err) {
-      logger.error(`Close error: ${err.message}`);
-      throw err;
-    }
-  },
 };
 
-module.exports = safeDb;
+// Initialize database on module load
+initializeDatabase().catch((err) => {
+  logger.error("Failed to initialize database:", err);
+});
+
+// Export the database object and initialization function
+module.exports = {
+  get db() {
+    return db;
+  },
+  initializeDatabase,
+};

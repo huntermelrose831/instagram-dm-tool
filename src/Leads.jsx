@@ -39,6 +39,7 @@ const Leads = () => {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [addedLeads, setAddedLeads] = useState(new Set());
+  const [selectedLeads, setSelectedLeads] = useState(new Set());
 
   // Advanced Targeting functionality - now Targets functionality
   const [targets, setTargets] = useState([]);
@@ -64,7 +65,7 @@ const Leads = () => {
   // Fetch available accounts for follower scraping
   const fetchAccounts = async () => {
     try {
-      const response = await fetch("/api/accounts");
+      const response = await fetch(`${API_BASE_URL}/api/accounts`);
       if (response.ok) {
         const accountsData = await response.json();
         setAccounts(accountsData || []);
@@ -100,9 +101,17 @@ const Leads = () => {
   }, []);
 
   // Targets functionality
+  // Use Vite environment variable or fallback for API base URL
+  const API_BASE_URL =
+    import.meta.env.VITE_API_BASE_URL ||
+    (window.location.hostname === "localhost" ||
+    window.location.hostname === "127.0.0.1"
+      ? "http://localhost:5001"
+      : "https://app.turbodm.pro");
+
   const fetchTargets = async () => {
     try {
-      const response = await fetch("http://localhost:5000/api/targets");
+      const response = await fetch(`${API_BASE_URL}/api/targets`);
       if (response.ok) {
         const data = await response.json();
         setTargets(data.targets || []);
@@ -119,9 +128,12 @@ const Leads = () => {
     setSuccess("");
 
     try {
-      const response = await fetch("http://localhost:5000/api/targets", {
+      const response = await fetch(`${API_BASE_URL}/api/targets`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": import.meta.env.VITE_API_KEY,
+        },
         body: JSON.stringify({ username: username.trim() }),
       });
 
@@ -130,6 +142,8 @@ const Leads = () => {
         setTargets(data.targets);
         setSuccess("Target added successfully!");
         setNewTarget("");
+        setTimeout(() => setSuccess(""), 3000);
+        // Fixed syntax: removed stray semicolon inside setTimeout callback
         setTimeout(() => setSuccess(""), 3000);
       } else {
         setError(data.message || "Failed to add target");
@@ -168,12 +182,9 @@ const Leads = () => {
   const removeTarget = async (username) => {
     setLoading(true);
     try {
-      const response = await fetch(
-        `http://localhost:5000/api/targets/${username}`,
-        {
-          method: "DELETE",
-        }
-      );
+      const response = await fetch(`${API_BASE_URL}/api/targets/${username}`, {
+        method: "DELETE",
+      });
 
       const data = await response.json();
       if (data.status === "success") {
@@ -188,14 +199,83 @@ const Leads = () => {
     }
   };
 
-  const exportTargets = () => {
-    const dataStr = JSON.stringify(targets, null, 2);
-    const dataBlob = new Blob([dataStr], { type: "application/json" });
-    const url = URL.createObjectURL(dataBlob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "targets.json";
-    link.click();
+  const clearAllTargets = async () => {
+    if (!window.confirm("Are you sure you want to clear all targets?")) return;
+
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/targets/clear`, {
+        method: "DELETE",
+      });
+
+      const data = await response.json();
+      if (data.status === "success") {
+        setTargets([]);
+        setSuccess("All targets cleared successfully!");
+        setTimeout(() => setSuccess(""), 3000);
+      }
+    } catch (error) {
+      setError("Failed to clear targets");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const exportTargets = async (format = "json") => {
+    try {
+      setLoading(true);
+
+      // Call the backend API to get the real targets data
+      const response = await fetch(
+        `/api/targeting/leads/export?format=${format}`
+      );
+
+      if (!response.ok) {
+        throw new Error("Failed to export targets");
+      }
+
+      // Get the filename from the response headers or create one
+      const contentDisposition = response.headers.get("Content-Disposition");
+      let filename = `targets_export_${Date.now()}.${format}`;
+
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
+        if (filenameMatch) {
+          filename = filenameMatch[1];
+        }
+      }
+
+      // Handle different response types
+      if (format === "csv") {
+        const csvData = await response.text();
+        const blob = new Blob([csvData], { type: "text/csv" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename;
+        link.click();
+        URL.revokeObjectURL(url);
+      } else {
+        const jsonData = await response.json();
+        const dataStr = JSON.stringify(jsonData, null, 2);
+        const blob = new Blob([dataStr], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename;
+        link.click();
+        URL.revokeObjectURL(url);
+      }
+
+      setSuccess(`Targets exported successfully as ${format.toUpperCase()}!`);
+      setTimeout(() => setSuccess(""), 3000);
+    } catch (error) {
+      console.error("Export error:", error);
+      setError(`Failed to export targets: ${error.message}`);
+      setTimeout(() => setError(""), 3000);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const copyAllTargets = () => {
@@ -219,6 +299,7 @@ const Leads = () => {
     setError("");
     setLeads([]);
     setAddedLeads(new Set());
+    setSelectedLeads(new Set());
 
     try {
       // Validate input based on search type
@@ -278,9 +359,12 @@ const Leads = () => {
         requestBody = { query: searchInput };
       }
 
-      const response = await fetch(`/api/scrape/${searchType}`, {
+      const response = await fetch(`${API_BASE_URL}/api/scrape/${searchType}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": import.meta.env.VITE_API_KEY,
+        },
         body: JSON.stringify(requestBody),
       });
       const data = await response.json();
@@ -293,124 +377,168 @@ const Leads = () => {
       }
     } catch (error) {
       setError(error.message);
-      // Mock data for demo
-      const mockLeads = [
-        "fitness_guru_2024",
-        "healthy_lifestyle",
-        "workout_warrior",
-        "nutrition_expert",
-        "gym_enthusiast",
-      ];
-      setLeads(mockLeads);
-      setSuccess(`Found ${mockLeads.length} leads! (Demo data)`);
+      console.error("Search error:", error);
     } finally {
       setLoading(false);
     }
   };
 
+  const addAllToTargets = () => {
+    const unadded = leads.filter((lead) =>
+      typeof lead === "string"
+        ? !addedLeads.has(lead)
+        : !addedLeads.has(lead.username)
+    );
+    unadded.forEach((lead) => {
+      const username = typeof lead === "string" ? lead : lead.username;
+      addToTargets(username);
+    });
+  };
+
   const addToTargets = async (username) => {
+    if (!username || addedLeads.has(username)) return;
+
     try {
-      const response = await fetch("/api/targets", {
+      const response = await fetch(`${API_BASE_URL}/api/leads/batch`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username }),
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": import.meta.env.VITE_API_KEY,
+        },
+        body: JSON.stringify({
+          leads: [
+            {
+              username,
+              source: "manual",
+              status: "new",
+              isTarget: true,
+              addedToTargets: true,
+            },
+          ],
+        }),
       });
 
-      if (response.ok) {
+      const data = await response.json();
+      if (data.status === "success") {
         setAddedLeads((prev) => new Set([...prev, username]));
-        setSuccess(`Added ${username} to targets!`);
+        setSuccess(`Added ${username} to targets successfully!`);
         setTimeout(() => setSuccess(""), 3000);
+      } else {
+        setError(data.message || "Failed to add to targets");
       }
     } catch (error) {
+      console.error("Error adding to targets:", error);
       setError("Failed to add to targets");
     }
   };
-  const addAllToTargets = async () => {
-    // Check if there are any leads
-    if (leads.length === 0) {
-      setError("No leads available to add. Please search for leads first.");
-      setTimeout(() => setError(""), 3000);
-      return;
-    }
 
-    const unadded = leads.filter((lead) => {
-      const username = typeof lead === "string" ? lead : lead.username;
-      return !addedLeads.has(username);
+  const handleLeadSelection = (username) => {
+    setSelectedLeads((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(username)) {
+        newSet.delete(username);
+      } else {
+        newSet.add(username);
+      }
+      return newSet;
     });
-
-    if (unadded.length === 0) {
-      setSuccess("All leads already added to targets!");
-      setTimeout(() => setSuccess(""), 3000);
-      return;
-    }
-
-    for (const lead of unadded) {
-      const username = typeof lead === "string" ? lead : lead.username;
-      await addToTargets(username);
-    }
-
-    setSuccess(`Added ${unadded.length} leads to targets successfully!`);
-    setTimeout(() => setSuccess(""), 3000);
   };
+
+  const handleSelectAll = () => {
+    const allUsernames = leads
+      .filter((lead) => {
+        const username = typeof lead === "string" ? lead : lead.username;
+        return !addedLeads.has(username);
+      })
+      .map((lead) => (typeof lead === "string" ? lead : lead.username));
+
+    setSelectedLeads(new Set(allUsernames));
+  };
+
+  const handleDeselectAll = () => {
+    setSelectedLeads(new Set());
+  };
+
+  const addSelectedToTargets = async () => {
+    if (selectedLeads.size === 0) return;
+
+    try {
+      const leadsToSave = Array.from(selectedLeads).map((username) => ({
+        username,
+        source: "scraped",
+        status: "new",
+        isTarget: true,
+        addedToTargets: true,
+      }));
+
+      const response = await fetch("http://localhost:5000/api/leads/batch", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": import.meta.env.VITE_API_KEY,
+        },
+        body: JSON.stringify({ leads: leadsToSave }),
+      });
+
+      const data = await response.json();
+      if (data.status === "success") {
+        setAddedLeads((prev) => new Set([...prev, ...selectedLeads]));
+        setSelectedLeads(new Set());
+        setSuccess(`Added ${data.savedCount} leads to targets successfully!`);
+        setTimeout(() => setSuccess(""), 3000);
+      } else {
+        setError(data.message || "Failed to add selected leads to targets");
+      }
+    } catch (error) {
+      console.error("Error adding selected leads to targets:", error);
+      setError("Failed to add selected leads to targets");
+    }
+  };
+
   const exportLeads = (source = "discovery", format = "json") => {
-    let dataToExport;
-    let filename;
-
     if (source === "discovery") {
-      // Export simple leads from discovery
-      dataToExport = leads;
-      filename = `leads_${searchType}_${Date.now()}.${format}`;
-    } else {
-      // Export advanced scraped leads
-      dataToExport = scrapedLeads;
-      filename = `scraped_leads_${Date.now()}.${format}`;
-    }
+      // Export simple leads from discovery search results
+      const dataToExport = leads;
+      const filename = `leads_${searchType}_${Date.now()}.${format}`;
 
-    if (format === "csv" && source === "advanced") {
-      // CSV export for advanced leads
-      const csvHeaders = [
-        "Username",
-        "Full Name",
-        "Followers",
-        "Following",
-        "Posts",
-        "Engagement Rate",
-        "Location",
-        "Tags",
-      ];
-      const csvRows = dataToExport.map((lead) => [
-        lead.username || "",
-        lead.fullName || "",
-        lead.followers || "",
-        lead.following || "",
-        lead.posts || "",
-        lead.engagementRate || "",
-        lead.location || "",
-        (lead.tags || []).join(";"),
-      ]);
+      if (format === "csv") {
+        const csvContent =
+          "Username\n" +
+          leads
+            .map((lead) => {
+              const username = typeof lead === "string" ? lead : lead.username;
+              return `"${username}"`;
+            })
+            .join("\n");
 
-      const csvContent = [
-        csvHeaders.join(","),
-        ...csvRows.map((row) => row.map((field) => `"${field}"`).join(",")),
-      ].join("\n");
-
-      const blob = new Blob([csvContent], { type: "text/csv" });
-      const url = URL.createObjectURL(blob);
+        const blob = new Blob([csvContent], { type: "text/csv" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename.replace(".json", ".csv");
+        link.click();
+        URL.revokeObjectURL(url);
+      } else {
+        // JSON export
+        const dataStr = JSON.stringify(dataToExport, null, 2);
+        const dataBlob = new Blob([dataStr], { type: "application/json" });
+        const url = URL.createObjectURL(dataBlob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename;
+        link.click();
+        URL.revokeObjectURL(url);
+      }
+    } else if (source === "targets") {
+      // Export targets from backend
+      const url = `/api/leads/export?source=targets&format=${format}`;
       const link = document.createElement("a");
       link.href = url;
-      link.download = filename.replace(".json", ".csv");
-      link.click();
-    } else {
-      // JSON export
-      const dataStr = JSON.stringify(dataToExport, null, 2);
-      const dataBlob = new Blob([dataStr], { type: "application/json" });
-      const url = URL.createObjectURL(dataBlob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = filename;
+      link.download = `targets_export.${format === "csv" ? "csv" : "json"}`;
       link.click();
     }
   };
+
   return (
     <div className="min-h-screen bg-white text-black">
       {/* Header */}
@@ -631,12 +759,27 @@ const Leads = () => {
                       Actions
                     </h2>
                     <div className="space-y-3">
+                      <div className="flex space-x-2">
+                        <button
+                          onClick={handleSelectAll}
+                          className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg font-semibold transition-colors text-sm"
+                        >
+                          Select All
+                        </button>
+                        <button
+                          onClick={handleDeselectAll}
+                          className="flex-1 bg-gray-600 hover:bg-gray-700 text-white px-3 py-2 rounded-lg font-semibold transition-colors text-sm"
+                        >
+                          Deselect All
+                        </button>
+                      </div>
                       <button
-                        onClick={addAllToTargets}
-                        className="w-full bg-green-600 hover:bg-green-700 text-white px-4 py-3 rounded-lg font-semibold transition-colors flex items-center justify-center"
+                        onClick={addSelectedToTargets}
+                        disabled={selectedLeads.size === 0}
+                        className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white px-4 py-3 rounded-lg font-semibold transition-colors flex items-center justify-center"
                       >
                         <FaUserPlus className="mr-2" />
-                        Add All to Targets
+                        Add Selected to Targets ({selectedLeads.size})
                       </button>
                       <button
                         onClick={() => exportLeads("discovery", "json")}
@@ -803,32 +946,55 @@ const Leads = () => {
                           const username =
                             typeof lead === "string" ? lead : lead.username;
                           const leadKey = username || `lead-${index}`;
+                          const isSelected = selectedLeads.has(username);
+                          const isAdded = addedLeads.has(username);
+
                           return (
                             <div
                               key={leadKey}
-                              className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg p-3 hover:bg-gray-100 transition-colors"
+                              className={`flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg p-3 hover:bg-gray-100 transition-colors ${
+                                isSelected ? "ring-2 ring-purple-300" : ""
+                              }`}
                             >
-                              <div className="flex-1">
-                                <span className="text-black font-medium">
-                                  @{username}
-                                </span>
-                                {typeof lead === "object" && lead.comment && (
-                                  <p className="text-xs text-gray-600 mt-1 truncate">
-                                    {lead.comment}
-                                  </p>
+                              <div className="flex items-center flex-1">
+                                {!isAdded && (
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={() =>
+                                      handleLeadSelection(username)
+                                    }
+                                    className="mr-3 h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
+                                  />
+                                )}
+                                <div className="flex-1">
+                                  <span
+                                    className={`font-medium ${isAdded ? "text-green-600" : "text-black"}`}
+                                  >
+                                    @{username}
+                                  </span>
+                                  {typeof lead === "object" && lead.comment && (
+                                    <p className="text-xs text-gray-600 mt-1 truncate">
+                                      {lead.comment}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex items-center space-x-2">
+                                {isAdded && (
+                                  <span className="text-xs bg-green-100 text-green-600 px-2 py-1 rounded">
+                                    Added
+                                  </span>
+                                )}
+                                {!isAdded && (
+                                  <button
+                                    onClick={() => addToTargets(username)}
+                                    className="px-3 py-1 bg-purple-100 text-purple-600 hover:bg-purple-200 rounded-lg text-sm font-medium transition-colors"
+                                  >
+                                    Add
+                                  </button>
                                 )}
                               </div>
-                              <button
-                                onClick={() => addToTargets(username)}
-                                disabled={addedLeads.has(username)}
-                                className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
-                                  addedLeads.has(username)
-                                    ? "bg-green-100 text-green-600 cursor-not-allowed"
-                                    : "bg-purple-100 text-purple-600 hover:bg-purple-200"
-                                }`}
-                              >
-                                {addedLeads.has(username) ? "Added" : "Add"}
-                              </button>
                             </div>
                           );
                         })}
@@ -919,11 +1085,18 @@ const Leads = () => {
                       Copy All Targets
                     </button>
                     <button
-                      onClick={exportTargets}
+                      onClick={() => exportTargets("json")}
                       className="w-full bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-3 rounded-lg transition-colors flex items-center justify-center"
                     >
                       <FaDownload className="mr-2" />
                       Export JSON
+                    </button>
+                    <button
+                      onClick={() => exportTargets("csv")}
+                      className="w-full bg-green-600 hover:bg-green-700 text-white px-4 py-3 rounded-lg transition-colors flex items-center justify-center"
+                    >
+                      <FaDownload className="mr-2" />
+                      Export CSV
                     </button>
                   </div>
                 </div>
@@ -935,15 +1108,7 @@ const Leads = () => {
                   <div className="flex items-center justify-between mb-6">
                     <h2 className="text-xl font-semibold text-black flex items-center">
                       <FaUsers className="mr-2 text-blue-600" />
-                      Target List (
-                      {
-                        targets.filter((target) =>
-                          target
-                            .toLowerCase()
-                            .includes(targetSearchTerm.toLowerCase())
-                        ).length
-                      }
-                      )
+                      Target List ({targets.length})
                     </h2>
 
                     <div className="flex items-center space-x-4">
@@ -952,17 +1117,22 @@ const Leads = () => {
                         <input
                           type="text"
                           value={targetSearchTerm}
-                          onChange={(e) =>
-                            handleTargetSearchTermChange(e.target.value)
-                          }
+                          onChange={(e) => setTargetSearchTerm(e.target.value)}
                           placeholder="Search targets..."
-                          className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-green-500 text-black"
+                          className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500 text-black"
                         />
                       </div>
+
+                      <button
+                        onClick={clearAllTargets}
+                        className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors flex items-center"
+                      >
+                        <FaTrash className="mr-2" />
+                        Clear All
+                      </button>
                     </div>
                   </div>
 
-                  {/* Targets Grid */}
                   {targets.filter((target) =>
                     target
                       .toLowerCase()

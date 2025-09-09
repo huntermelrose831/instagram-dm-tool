@@ -1,8 +1,20 @@
 {
   "name": "instagram-dm-tool",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description": "Professional Instagram DM Tool for lead generation and automated messaging",
+  "author": "Hunter Melrose <your.email@example.com>",
+  "license": "Commercial",
+  "keywords": [
+    "instagram",
+    "dm",
+    "automation",
+    "lead-generation",
+    "marketing"
+  ],
   "type": "module",
+  "main": "electron/main.cjs",
+  "homepage": "./",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -13,7 +25,20 @@
     "test:coverage": "vitest run --coverage",
     "format": "prettier --write \"src/**/*.{js,jsx}\"",
     "analyze": "vite build --mode analyze",
-    "start:prod": "LOG_LEVEL=warn NODE_ENV=production npm run dev"
+    "start:prod": "LOG_LEVEL=warn NODE_ENV=production npm run dev",
+    "electron": "electron .",
+    "electron-dev": "ELECTRON_IS_DEV=true electron .",
+    "build-electron": "electron-builder",
+    "build-electron-win": "electron-builder --win",
+    "build-electron-mac": "electron-builder --mac",
+    "build-electron-linux": "electron-builder --linux",
+    "generate-icons": "node scripts/generate-icons.cjs",
+    "dist": "npm run build && npm run build-electron",
+    "dist:win": "npm run build && npm run build-electron-win",
+    "dist:mac": "npm run build && npm run build-electron-mac",
+    "dist:linux": "npm run build && npm run build-electron-linux",
+    "release": "npm run generate-icons && npm run build && npm run build-electron",
+    "release:all": "npm run generate-icons && npm run build && electron-builder --win --mac --linux"
   },
   "dependencies": {
     "apify-client": "^2.12.4",
@@ -27,7 +52,8 @@
     "react-dom": "^19.1.0",
     "react-icons": "^5.5.0",
     "react-router-dom": "^7.6.1",
-    "recharts": "^2.15.3"
+    "recharts": "^2.15.3",
+    "sharp": "^0.34.3"
   },
   "devDependencies": {
     "@eslint/js": "^9.25.0",
@@ -35,12 +61,120 @@
     "@types/react-dom": "^19.1.2",
     "@vitejs/plugin-react": "^4.4.1",
     "autoprefixer": "^10.4.21",
+    "electron": "^33.4.11",
+    "electron-builder": "^26.0.12",
     "eslint": "^9.25.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.19",
     "globals": "^16.0.0",
     "postcss": "^8.5.3",
     "tailwindcss": "^3.4.17",
-    "vite": "^6.3.5"
+    "terser": "^5.43.1",
+    "vite": "^6.3.5",
+    "vite-plugin-electron": "^0.28.0",
+    "vite-plugin-electron-renderer": "^0.14.5"
+  },
+  "build": {
+    "appId": "com.instagramdmtool.app",
+    "productName": "Instagram DM Tool",
+    "copyright": "Copyright © 2025 Hunter Melrose",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "icon": "assets/icons/icon.png",
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "assets/icons/**/*",
+      "package.json",
+      ".env.production"
+    ],
+    "extraResources": [
+      {
+        "from": "backend",
+        "to": "backend",
+        "filter": [
+          "**/*",
+          "!logs/*",
+          "!exports/*",
+          "!*.log",
+          "!*.sqlite",
+          "!*.db",
+          "!dmautomation.db",
+          "!data/",
+          "!exports/"
+        ]
+      },
+      {
+        "from": "backend/node_modules",
+        "to": "backend/node_modules"
+      }
+    ],
+    "extraMetadata": {
+      "main": "electron/main.cjs"
+    },
+    "nodeGypRebuild": false,
+    "buildDependenciesFromSource": false,
+    "asar": true,
+    "asarUnpack": [
+      "backend/database/**",
+      "backend/logs/**",
+      "backend/exports/**"
+    ],
+    "mac": {
+      "icon": "assets/icons/icon-large.png",
+      "category": "public.app-category.productivity",
+      "target": [],
+      "hardenedRuntime": false
+    },
+    "win": {
+      "icon": "assets/icons/icon-large.png",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "verifyUpdateCodeSignature": false,
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "linux": {
+      "icon": "assets/icons",
+      "category": "Utility",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "deleteAppDataOnUninstall": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Instagram DM Tool",
+      "menuCategory": "Marketing Tools",
+      "runAfterFinish": true
+    }
   }
 }

@@ -139,9 +139,18 @@ export function AppStateProvider({ children }) {
       const savedState = localStorage.getItem("turbodm-app-state");
       if (savedState) {
         const parsedState = JSON.parse(savedState);
+        // Deep merge for reports to ensure all fields are restored
+        const mergedState = {
+          ...initialState,
+          ...parsedState,
+          reports: {
+            ...initialState.reports,
+            ...parsedState.reports,
+          },
+        };
         dispatch({
           type: actionTypes.LOAD_STATE_FROM_STORAGE,
-          payload: parsedState,
+          payload: mergedState,
         });
       }
     } catch (error) {
@@ -152,7 +161,7 @@ export function AppStateProvider({ children }) {
   // Save state to localStorage whenever it changes
   useEffect(() => {
     try {
-      // Only save certain parts of state, exclude temporary UI state
+      // Save the full reports state, including reports, scheduledReports, exportJobs, etc.
       const stateToSave = {
         messaging: {
           selectedAccount: state.messaging.selectedAccount,
@@ -161,8 +170,7 @@ export function AppStateProvider({ children }) {
           activeTab: state.messaging.activeTab,
         },
         reports: {
-          activeTab: state.reports.activeTab,
-          reportConfig: state.reports.reportConfig,
+          ...state.reports,
         },
         targets: {
           searchQuery: state.targets.searchQuery,

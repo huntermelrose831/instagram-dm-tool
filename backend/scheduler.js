@@ -5,7 +5,7 @@ const {
   updateDMCount,
 } = require("./database/messaging");
 const { sendDMs } = require("./sendDMs");
-const accountsStore = require("./accountsStore");
+const AccountsService = require("./database/accounts");
 const logger = require("./utils/logger");
 
 // Instagram's general rate limits (customize these based on your needs)
@@ -51,7 +51,7 @@ const processSingleMessage = async (fromUsername, targetUsername, message) => {
   }
 };
 
-// Process a job with multiple targets
+// Process a job with mudm-progressltiple targets
 const processJob = async (job) => {
   const {
     id,
@@ -64,38 +64,48 @@ const processJob = async (job) => {
 
   logger.debug(`Processing job #${id} from ${from_username}`);
 
-  // Verify account exists and has valid cookies
-  // Remove @ prefix if present
+  // Clean the username (remove @ prefix if present)
   const cleanUsername = from_username.replace(/^@/, "");
-
-  // Check available accounts with minimal logging
-  const allAccounts = accountsStore.loadAccounts();
-  const { AccountsService } = require("./database");
-  const dbAccounts = AccountsService.getAccounts();
 
   logger.debug(`Looking for account: ${cleanUsername}`);
 
-  // Try different variations of the username in JSON store first
-  let account = accountsStore.getAccountByUsername(cleanUsername);
+  // First, try to find the account in the database (this is the primary source)
+  const { AccountsService } = require("./database");
+  let account = AccountsService.getAccountByUsernameOrEmail(cleanUsername);
 
   if (!account) {
-    // Try with @gmail.com suffix
-    account = accountsStore.getAccountByUsername(`${cleanUsername}@gmail.com`);
-    logger.debug(`Trying with @gmail.com: ${cleanUsername}@gmail.com`);
+    // Try with exact username match
+    account = AccountsService.getAccountByUsername(cleanUsername);
   }
 
   if (!account) {
-    // Try finding any account that starts with the username
-    account = allAccounts.find((acc) => acc.username.startsWith(cleanUsername));
-    logger.debug(`Trying to find account starting with: ${cleanUsername}`);
+    // Try finding by email if the cleanUsername looks like an email
+    if (cleanUsername.includes("@")) {
+      account = AccountsService.getAccountByEmail(cleanUsername);
+    }
   }
 
-  // If not found in JSON store, try database (but we need cookies for Instagram)
+  // If still not found in database, try the JSON store as fallback
   if (!account) {
-    const dbAccount = AccountsService.getAccountByUsername(cleanUsername);
-    if (dbAccount && dbAccount.cookies) {
-      account = dbAccount;
-      logger.debug(`Found account in database: ${dbAccount.username}`);
+    logger.debug(`Account not found in database, trying JSON store...`);
+
+    const allAccounts = AccountsService.getAccounts();
+    account = AccountsService.getAccountByUsername(cleanUsername);
+
+    if (!account) {
+      // Try with @gmail.com suffix
+      account = AccountsService.getAccountByUsername(
+        `${cleanUsername}@gmail.com`
+      );
+      logger.debug(`Trying with @gmail.com: ${cleanUsername}@gmail.com`);
+    }
+
+    if (!account) {
+      // Try finding any account that starts with the username
+      account = allAccounts.find((acc) =>
+        acc.username.startsWith(cleanUsername)
+      );
+      logger.debug(`Trying to find account starting with: ${cleanUsername}`);
     }
   }
 
@@ -103,14 +113,33 @@ const processJob = async (job) => {
     logger.error(
       `Failed to find account for username: ${from_username} (cleaned: ${cleanUsername})`
     );
+
+    // Log available accounts for debugging
+    const dbAccounts = AccountsService.getAccounts();
+    const jsonAccounts = AccountsService.getAccounts();
     logger.error(
-      `Available accounts: ${[...allAccounts, ...dbAccounts].map((acc) => acc.username).join(", ")}`
+      `Available DB accounts: ${dbAccounts.map((acc) => acc.username).join(", ")}`
+    );
+    logger.error(
+      `Available JSON accounts: ${jsonAccounts.map((acc) => acc.username).join(", ")}`
+    );
+
+    await updateJobStatus(id, "failed");
+    return 0;
+  }
+
+  // Verify the account has cookies (required for Instagram automation)
+  if (!account.cookies || account.cookies.length === 0) {
+    logger.error(
+      `Account ${account.username} found but has no cookies. Please log in first.`
     );
     await updateJobStatus(id, "failed");
     return 0;
   }
 
-  logger.debug(`Found account: ${account.username}`);
+  logger.debug(
+    `Found account: ${account.username} with ${account.cookies.length} cookies`
+  );
 
   try {
     targets = Array.isArray(target_usernames)
@@ -264,28 +293,11 @@ const checkPendingJobs = async () => {
 // Clean up jobs that have been stuck in "running" state for too long
 const cleanupStuckJobs = async () => {
   try {
-    const db = require("./database/db");
-
-    // Find jobs that have been "running" for more than 15 minutes
-    const stuckJobs = db
-      .prepare(
-        `
-      SELECT id, from_username, schedule_time, created_at
-      FROM scheduled_jobs 
-      WHERE status = 'running' 
-      AND datetime(created_at, '+15 minutes') < datetime('now')
-    `
-      )
-      .all();
-
-    if (stuckJobs.length > 0) {
-      console.log(`Found ${stuckJobs.length} stuck jobs, marking as failed...`);
-
-      for (const job of stuckJobs) {
-        console.log(`Cleaning up stuck job #${job.id} (${job.from_username})`);
-        await updateJobStatus(job.id, "failed");
-      }
-    }
+    // Use the MongoDB cleanupStuckJobs function from messaging
+    const {
+      cleanupStuckJobs: dbCleanupStuckJobs,
+    } = require("./database/messaging");
+    await dbCleanupStuckJobs();
   } catch (error) {
     console.error("Error cleaning up stuck jobs:", error.message);
   }
@@ -293,21 +305,14 @@ const cleanupStuckJobs = async () => {
 
 // Initialize scheduler and clean up stuck jobs
 const initializeScheduler = async () => {
-  console.log("🚀 Initializing DM scheduler...");
-
   // Clean up any stuck jobs from previous runs
   await cleanupStuckJobs();
 
-  // Start the job checker
-  console.log("📅 Starting scheduled job checker (runs every minute)");
-
-  // Run immediately then every minute
+  // Start the job checker - runs every minute
   await checkPendingJobs();
 
   // Schedule to run every minute
   cron.schedule("* * * * *", checkPendingJobs);
-
-  console.log("✅ Scheduler initialized successfully");
 };
 
 module.exports = {

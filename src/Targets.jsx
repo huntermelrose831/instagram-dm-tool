@@ -19,13 +19,16 @@ const Targets = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const API_BASE_URL =
+    import.meta.env.VITE_API_BASE_URL || "http://localhost:5001";
+
   useEffect(() => {
     fetchTargets();
   }, []);
 
   const fetchTargets = async () => {
     try {
-      const response = await fetch("/api/targets");
+      const response = await fetch(`${API_BASE_URL}/api/targets`);
       const data = await response.json();
       setUsernames(data.targets || []);
     } catch (error) {
@@ -40,7 +43,7 @@ const Targets = () => {
     setSuccess("");
 
     try {
-      const response = await fetch("/api/targets", {
+      const response = await fetch(`${API_BASE_URL}/api/targets`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username: username.trim() }),

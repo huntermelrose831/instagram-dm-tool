@@ -26,6 +26,9 @@ const ScheduleDM = () => {
   const [loading, setLoading] = useState(false);
   const [scheduledJobs, setScheduledJobs] = useState([]);
 
+  const API_BASE_URL =
+    import.meta.env.VITE_API_BASE_URL || "http://localhost:5001";
+
   const recurringOptions = [
     { value: "hourly", label: "Every Hour" },
     { value: "daily", label: "Daily" },
@@ -40,7 +43,7 @@ const ScheduleDM = () => {
 
   const fetchAccounts = async () => {
     try {
-      const response = await fetch("/api/accounts");
+      const response = await fetch(`${API_BASE_URL}/api/accounts`);
       const data = await response.json();
       setAccounts(data);
     } catch (error) {
@@ -50,7 +53,7 @@ const ScheduleDM = () => {
 
   const fetchScheduledJobs = async () => {
     try {
-      const response = await fetch("/api/scheduled-jobs");
+      const response = await fetch(`${API_BASE_URL}/api/scheduled-jobs`);
       const data = await response.json();
       if (data.status === "success") {
         setScheduledJobs(data.jobs || []);
@@ -97,7 +100,7 @@ const ScheduleDM = () => {
         throw new Error("Please fill in all required fields");
       }
 
-      const response = await fetch("/api/schedule-dm", {
+      const response = await fetch(`${API_BASE_URL}/api/schedule-dm`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -129,9 +132,12 @@ const ScheduleDM = () => {
 
   const cancelJob = async (jobId) => {
     try {
-      const response = await fetch(`/api/scheduled-jobs/${jobId}`, {
-        method: "DELETE",
-      });
+      const response = await fetch(
+        `${API_BASE_URL}/api/scheduled-jobs/${jobId}`,
+        {
+          method: "DELETE",
+        }
+      );
 
       if (response.ok) {
         setStatus("Job cancelled successfully");

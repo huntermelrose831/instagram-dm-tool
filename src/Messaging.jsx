@@ -73,6 +73,9 @@ const Messaging = () => {
   // State for scheduled jobs (not persisted)
   const [scheduledJobs, setScheduledJobs] = useState([]);
 
+  const API_BASE_URL =
+    import.meta.env.VITE_API_BASE_URL || "http://localhost:5001";
+
   // Initialize state from context or defaults
   useEffect(() => {
     if (!scheduleTime) {
@@ -127,7 +130,9 @@ const Messaging = () => {
     if (!progressSession) return;
     const interval = setInterval(async () => {
       try {
-        const res = await fetch(`/api/dm-progress/${progressSession}`);
+        const res = await fetch(
+          `${API_BASE_URL}/api/dm-progress/${progressSession}`
+        );
         if (!res.ok) return;
         const data = await res.json();
         setProgressEvents(data.events);
@@ -155,7 +160,7 @@ const Messaging = () => {
 
   const fetchAccounts = async () => {
     try {
-      const response = await fetch("/api/accounts");
+      const response = await fetch(`${API_BASE_URL}/api/accounts`);
       const data = await response.json();
       setAccounts(data);
     } catch (error) {
@@ -165,7 +170,7 @@ const Messaging = () => {
 
   const fetchScheduledJobs = async () => {
     try {
-      const response = await fetch("/api/scheduled-jobs");
+      const response = await fetch(`${API_BASE_URL}/api/scheduled-jobs`);
       const data = await response.json();
       if (data.status === "success") {
         setScheduledJobs(data.jobs || []);
@@ -215,6 +220,7 @@ const Messaging = () => {
         .filter(Boolean);
       const currentMessages = Array.isArray(messages) ? messages : [""];
       const validMessages = currentMessages.filter((m) => m.trim());
+
       if (
         !selectedAccount ||
         targetsList.length === 0 ||
@@ -222,28 +228,46 @@ const Messaging = () => {
       ) {
         throw new Error("Please fill in all required fields");
       }
-      
+
+      // Add debugging - log the request payload
+      const requestPayload = {
+        username: selectedAccount, // Changed from email to username
+        usernames: targetsList,
+        message: validMessages[0],
+        messageVariations: validMessages,
+      };
+
+      console.log("Sending request with payload:", requestPayload);
+
       // Start session
-      const startRes = await fetch("/api/send-dms-progress", {
+      const startRes = await fetch(`${API_BASE_URL}/api/send-dms-progress`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-api-key": "mutatekey123",
+          "x-api-key":
+            "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
         },
-        body: JSON.stringify({
-          email: selectedAccount,
-          usernames: targetsList,
-          message: validMessages[0],
-          messageVariations: validMessages,
-        }),
+        body: JSON.stringify(requestPayload),
       });
+
+      console.log("Response status:", startRes.status);
+
+      if (!startRes.ok) {
+        const errorText = await startRes.text();
+        console.log("Error response:", errorText);
+        throw new Error(`Request failed: ${startRes.status} - ${errorText}`);
+      }
+
       const startData = await startRes.json();
+      console.log("Success response:", startData);
+
       if (startData.sessionId) {
         setProgressSession(startData.sessionId);
       } else {
         throw new Error("Failed to start progress session");
       }
     } catch (error) {
+      console.error("Full error:", error);
       setError(error.message);
       setShowProgress(false);
     } finally {
@@ -277,11 +301,12 @@ const Messaging = () => {
         (acc) => acc.email === selectedAccount
       );
       const selectedUsername = selectedAccObj ? selectedAccObj.username : "";
-      const response = await fetch("/api/schedule-dms", {
+      const response = await fetch(`${API_BASE_URL}/api/schedule-dms`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-api-key": "mutatekey123",
+          "x-api-key":
+            "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
         },
         body: JSON.stringify({
           email: selectedAccount,
@@ -314,9 +339,12 @@ const Messaging = () => {
   };
   const cancelJob = async (jobId) => {
     try {
-      const response = await fetch(`/api/scheduled-jobs/${jobId}`, {
-        method: "DELETE",
-      });
+      const response = await fetch(
+        `${API_BASE_URL}/api/scheduled-jobs/${jobId}`,
+        {
+          method: "DELETE",
+        }
+      );
 
       if (response.ok) {
         setStatus("Job cancelled successfully");
@@ -328,9 +356,12 @@ const Messaging = () => {
   };
   const deleteJob = async (jobId) => {
     try {
-      const response = await fetch(`/api/scheduled-jobs/${jobId}/delete`, {
-        method: "DELETE",
-      });
+      const response = await fetch(
+        `${API_BASE_URL}/api/scheduled-jobs/${jobId}/delete`,
+        {
+          method: "DELETE",
+        }
+      );
       if (response.ok) {
         fetchScheduledJobs();
       } else {
@@ -471,7 +502,8 @@ const Messaging = () => {
                       placeholder="Enter usernames separated by commas (e.g., user1, user2, user3)"
                       required
                       rows={4}
-                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-green-500 focus:ring-4 focus:ring-green-100 text-gray-900 resize-none transition-all duration-200 hover:border-gray-300"
+                      disabled={loading}
+                      className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-green-500 focus:ring-4 focus:ring-green-100 text-gray-900 resize-none transition-all duration-200 hover:border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
                     />
                     <div className="mt-2 flex items-center justify-between">
                       <p className="text-sm text-gray-500">
@@ -524,7 +556,8 @@ const Messaging = () => {
                                 placeholder={`Message variation ${index + 1}...`}
                                 required={index === 0}
                                 rows={3}
-                                className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-green-500 focus:ring-4 focus:ring-green-100 text-gray-900 resize-none transition-all duration-200 hover:border-gray-300"
+                                disabled={loading}
+                                className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:outline-none focus:border-green-500 focus:ring-4 focus:ring-green-100 text-gray-900 resize-none transition-all duration-200 hover:border-gray-300 disabled:opacity-50 disabled:cursor-not-allowed"
                               />
                             </div>
                             {(Array.isArray(messages) ? messages : [""])
@@ -707,14 +740,14 @@ const Messaging = () => {
                   <div className="space-y-4 max-h-96 overflow-y-auto">
                     {scheduledJobs.map((job, index) => (
                       <div
-                        key={job.id || index}
+                        key={job._id || job.id || index}
                         className="border-2 border-gray-100 rounded-xl p-4 hover:border-gray-200 hover:shadow-sm transition-all duration-200 bg-gradient-to-r from-gray-50 to-white"
                       >
                         {" "}
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center">
                             <span className="font-medium text-black text-sm">
-                              @{job.from_username}
+                              @{job.from_username || job.account_username}
                             </span>
                             <span
                               className={`ml-2 px-2 py-1 rounded-full text-xs border ${getJobStatusColor(
@@ -728,7 +761,7 @@ const Messaging = () => {
                           <div className="flex items-center space-x-1">
                             {job.status === "pending" && (
                               <button
-                                onClick={() => cancelJob(job.id)}
+                                onClick={() => cancelJob(job._id || job.id)}
                                 className="text-orange-500 hover:text-red-700 p-1 transition-colors"
                                 title="Cancel Job"
                               >
@@ -749,7 +782,7 @@ const Messaging = () => {
                               job.status === "completed" ||
                               job.status === "cancelled") && (
                               <button
-                                onClick={() => deleteJob(job.id)}
+                                onClick={() => deleteJob(job._id || job.id)}
                                 className="text-gray-400 hover:text-red-600 p-1 transition-colors"
                                 title={`Delete ${job.status} job`}
                               >
@@ -761,15 +794,18 @@ const Messaging = () => {
                         <div className="text-xs text-gray-600 space-y-1">
                           <p>
                             <FaUsers className="inline mr-1" />
-                            {
-                              JSON.parse(job.target_usernames || "[]").length
-                            }{" "}
+                            {Array.isArray(job.target_usernames)
+                              ? job.target_usernames.length
+                              : JSON.parse(job.target_usernames || "[]")
+                                  .length}{" "}
                             targets
                           </p>
                           <p>
                             <FaClock className="inline mr-1" />
                             {new Date(
-                              job.schedule_time.replace(" ", "T")
+                              (job.scheduled_for || job.schedule_time || "")
+                                .toString()
+                                .replace(" ", "T")
                             ).toLocaleString()}
                           </p>
                           {job.is_recurring && (

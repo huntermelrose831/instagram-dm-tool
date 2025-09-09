@@ -23,12 +23,37 @@ async function scrapeKeyword(keyword, igUsername, maxPosts = 10) {
   // Retrieve account details from the database
   let account;
   try {
-    account = AccountsService.getAccountByUsername(igUsername);
-    if (!account || !account.cookies || account.cookies.length === 0) {
+    account = await AccountsService.getAccountByUsername(igUsername);
+    if (!account || !account.cookies) {
       throw new Error(
         `No cookies found for account ${igUsername}. Please log in first.`
       );
     }
+
+    // Parse cookies if stored as JSON string
+    let parsedCookies = null;
+    try {
+      parsedCookies =
+        typeof account.cookies === "string"
+          ? JSON.parse(account.cookies)
+          : account.cookies;
+    } catch (parseError) {
+      console.error(
+        `Error parsing cookies for account ${igUsername}:`,
+        parseError
+      );
+      throw new Error(
+        `Invalid cookie format for account ${igUsername}. Please log in again.`
+      );
+    }
+
+    if (!Array.isArray(parsedCookies) || parsedCookies.length === 0) {
+      throw new Error(
+        `No valid cookies found for account ${igUsername}. Please log in again.`
+      );
+    }
+
+    account.cookies = parsedCookies; // Use parsed cookies
   } catch (error) {
     console.error("Error retrieving account:", error.message);
     throw new Error(
@@ -68,10 +93,25 @@ async function scrapeKeyword(keyword, igUsername, maxPosts = 10) {
     console.log("Setting authentication cookies...");
     console.log(`Found ${account.cookies.length} existing cookies`);
 
-    // Set cookies
+    // Set cookies with proper formatting
     for (const cookie of account.cookies) {
       try {
-        await page.setCookie(cookie);
+        const cleanCookie = {
+          name: cookie.name,
+          value: cookie.value,
+          domain: cookie.domain || ".instagram.com",
+          path: cookie.path || "/",
+          httpOnly: cookie.httpOnly !== undefined ? cookie.httpOnly : false,
+          secure: cookie.secure !== undefined ? cookie.secure : true,
+          sameSite: cookie.sameSite || "None",
+        };
+
+        // Add expiration only if valid and not expired
+        if (cookie.expires && cookie.expires > Date.now() / 1000) {
+          cleanCookie.expires = cookie.expires;
+        }
+
+        await page.setCookie(cleanCookie);
         console.log(`✓ Applied cookie: ${cookie.name}`);
       } catch (error) {
         console.log(`✗ Failed to set cookie ${cookie.name}:`, error.message);

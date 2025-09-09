@@ -13,10 +13,33 @@ async function scrapeFollowers(profileUrl, igUsername) {
   console.log(`Using account: ${igUsername} for authentication`);
 
   // Get account and validate cookies
-  const account = AccountsService.getAccountByUsername(igUsername);
+  const account = await AccountsService.getAccountByUsername(igUsername);
   if (!account?.cookies) {
     throw new Error(
       `No cookies found for account ${igUsername}. Please log in first.`
+    );
+  }
+
+  // Parse cookies if stored as JSON string
+  let parsedCookies = null;
+  try {
+    parsedCookies =
+      typeof account.cookies === "string"
+        ? JSON.parse(account.cookies)
+        : account.cookies;
+  } catch (parseError) {
+    console.error(
+      `Error parsing cookies for account ${igUsername}:`,
+      parseError
+    );
+    throw new Error(
+      `Invalid cookie format for account ${igUsername}. Please log in again.`
+    );
+  }
+
+  if (!Array.isArray(parsedCookies) || parsedCookies.length === 0) {
+    throw new Error(
+      `No valid cookies found for account ${igUsername}. Please log in again.`
     );
   }
 
@@ -65,7 +88,7 @@ async function scrapeFollowers(profileUrl, igUsername) {
     const currentCookies = await page.cookies();
     console.log(`Found ${currentCookies.length} existing cookies`);
 
-    for (const cookie of account.cookies) {
+    for (const cookie of parsedCookies) {
       try {
         // Ensure cookie is formatted correctly for Instagram domain
         const cleanCookie = {

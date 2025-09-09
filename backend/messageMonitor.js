@@ -3,7 +3,7 @@ const StealthPlugin = require("puppeteer-extra-plugin-stealth");
 const { addCampaignReply } = require("./database/messaging");
 const { delay } = require("./utils/delay");
 const { SELECTORS } = require("./utils/selectors");
-const accountsStore = require("./accountsStore");
+const AccountsService = require("./database/accounts");
 
 puppeteer.use(StealthPlugin());
 
@@ -20,21 +20,20 @@ class MessageMonitor {
     }
 
     console.log(`Starting message monitor for ${username}`);
-    
+
     try {
       const monitor = await this.createMonitorInstance(username);
       this.activeMonitors.set(username, monitor);
-      
+
       // Start monitoring loop
       this.monitorMessages(username, monitor);
-      
     } catch (error) {
       console.error(`Failed to start monitor for ${username}:`, error);
     }
   }
 
   async createMonitorInstance(username) {
-    const account = accountsStore.getAccountByUsername(username);
+    const account = AccountsService.getAccountByUsername(username);
     if (!account) {
       throw new Error(`Account not found: ${username}`);
     }
@@ -52,7 +51,7 @@ class MessageMonitor {
 
     const page = await browser.newPage();
     await page.setViewport({ width: 1366, height: 768 });
-    
+
     // Set user agent
     await page.setUserAgent(
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
@@ -60,7 +59,7 @@ class MessageMonitor {
 
     // Login to Instagram
     await this.loginToInstagram(page, account);
-    
+
     // Navigate to messages
     await page.goto("https://www.instagram.com/direct/inbox/");
     await delay(3000);
@@ -102,14 +101,13 @@ class MessageMonitor {
       try {
         // Check for new messages
         const conversations = await this.getConversations(page);
-        
+
         for (const conversation of conversations) {
           await this.processConversation(page, conversation, username);
         }
 
         // Wait before next check
         await delay(10000); // Check every 10 seconds
-        
       } catch (error) {
         console.error(`Error monitoring messages for ${username}:`, error);
         await delay(30000); // Wait longer on error
@@ -126,17 +124,19 @@ class MessageMonitor {
       for (let i = 0; i < Math.min(conversationElements.length, 10); i++) {
         try {
           const element = conversationElements[i];
-          const hasUnread = await element.$('.x1n2onr6') !== null; // Unread indicator
-          
+          const hasUnread = (await element.$(".x1n2onr6")) !== null; // Unread indicator
+
           if (hasUnread) {
             const usernameElement = await element.$('[dir="auto"]');
-            const username = usernameElement ? await page.evaluate(el => el.textContent, usernameElement) : null;
-            
+            const username = usernameElement
+              ? await page.evaluate((el) => el.textContent, usernameElement)
+              : null;
+
             if (username) {
               conversations.push({
                 element,
                 username: username.trim(),
-                hasUnread: true
+                hasUnread: true,
               });
             }
           }
@@ -161,7 +161,7 @@ class MessageMonitor {
 
       // Get latest messages
       const messages = await this.getLatestMessages(page);
-      
+
       for (const message of messages) {
         if (message.isFromOther && message.isNew) {
           await this.processIncomingMessage(
@@ -176,16 +176,20 @@ class MessageMonitor {
       // Go back to inbox
       await page.goBack();
       await delay(1000);
-
     } catch (error) {
-      console.error(`Error processing conversation with ${conversation.username}:`, error);
+      console.error(
+        `Error processing conversation with ${conversation.username}:`,
+        error
+      );
     }
   }
 
   async getLatestMessages(page) {
     try {
       // Get message elements from the conversation
-      const messageElements = await page.$$('[data-testid="message-container"]');
+      const messageElements = await page.$$(
+        '[data-testid="message-container"]'
+      );
       const messages = [];
 
       // Only check the last few messages to avoid processing old ones
@@ -193,15 +197,15 @@ class MessageMonitor {
 
       for (const element of recentMessages) {
         try {
-          const messageText = await page.evaluate(el => {
+          const messageText = await page.evaluate((el) => {
             const textElement = el.querySelector('[dir="auto"]');
-            return textElement ? textElement.textContent : '';
+            return textElement ? textElement.textContent : "";
           }, element);
 
           // Determine if message is from the other person
-          const isFromOther = await page.evaluate(el => {
+          const isFromOther = await page.evaluate((el) => {
             // Instagram messages from others typically have different styling
-            return !el.classList.contains('x1n2onr6'); // Adjust selector as needed
+            return !el.classList.contains("x1n2onr6"); // Adjust selector as needed
           }, element);
 
           if (messageText && isFromOther) {
@@ -209,7 +213,7 @@ class MessageMonitor {
               text: messageText.trim(),
               isFromOther: true,
               isNew: true, // For now, treat as new (could add timestamp checking)
-              element
+              element,
             });
           }
         } catch (error) {
@@ -232,23 +236,23 @@ class MessageMonitor {
 
       // Record the message in campaign replies if applicable
       await this.recordIncomingMessage(message, fromUsername, monitorUsername);
-
     } catch (error) {
       console.error(`Error processing message from ${fromUsername}:`, error);
     }
   }
 
-
-
   async sendResponse(page, messageText) {
     try {
       // Find message input field
-      const messageInput = await page.waitForSelector('div[contenteditable="true"]', { timeout: 5000 });
-      
+      const messageInput = await page.waitForSelector(
+        'div[contenteditable="true"]',
+        { timeout: 5000 }
+      );
+
       if (messageInput) {
         // Clear any existing text
-        await page.evaluate(el => el.textContent = '', messageInput);
-        
+        await page.evaluate((el) => (el.textContent = ""), messageInput);
+
         // Type the response
         await messageInput.type(messageText);
         await delay(1000);
@@ -281,11 +285,11 @@ class MessageMonitor {
       await addCampaignReply({
         campaign_id: null, // Could be linked to active campaigns
         username: fromUsername,
-        message_content: '', // The original message we sent (if any)
+        message_content: "", // The original message we sent (if any)
         reply_content: message.text,
-        sentiment: 'neutral', // Could add sentiment analysis
+        sentiment: "neutral", // Could add sentiment analysis
         is_read: true,
-        received_at: new Date().toISOString()
+        received_at: new Date().toISOString(),
       });
     } catch (error) {
       console.error("Error recording incoming message:", error);
@@ -322,5 +326,5 @@ const messageMonitor = new MessageMonitor();
 
 module.exports = {
   MessageMonitor,
-  messageMonitor
+  messageMonitor,
 };

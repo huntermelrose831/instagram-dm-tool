@@ -139,11 +139,14 @@ const TeamCollaboration = () => {
 
   const handleUpdateMemberRole = async (memberId, newRole) => {
     try {
-      const response = await fetch(`/api/team/members/${memberId}/role`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role: newRole }),
-      });
+      const response = await fetch(
+        `${API_BASE_URL}/api/team/members/${memberId}/role`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role: newRole }),
+        }
+      );
 
       if (response.ok) {
         await fetchTeamData();

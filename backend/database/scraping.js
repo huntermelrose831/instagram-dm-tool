@@ -1,178 +1,214 @@
-const db = require("./db");
+const { db, initializeDatabase } = require("./db");
+const logger = require("../utils/logger");
+
+const TABLE_NAME = "scraping_jobs";
+
+const init = async () => {
+  try {
+    await initializeDatabase();
+
+    // Create scraping_jobs table after main database is initialized
+    await new Promise((resolve, reject) => {
+      db.run(
+        `
+        CREATE TABLE IF NOT EXISTS ${TABLE_NAME} (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          type TEXT NOT NULL,
+          targets TEXT,
+          filters TEXT,
+          max_leads INTEGER DEFAULT 1000,
+          is_active BOOLEAN DEFAULT 1,
+          status TEXT DEFAULT 'pending',
+          progress REAL DEFAULT 0,
+          completed_leads INTEGER DEFAULT 0,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `,
+        (err) => {
+          if (err) {
+            logger.error("Scraping jobs table creation failed:", err);
+            reject(err);
+          } else {
+            resolve();
+          }
+        }
+      );
+    });
+
+    // Create indexes for better performance
+    const indexes = [
+      `CREATE INDEX IF NOT EXISTS idx_scraping_jobs_status ON ${TABLE_NAME}(status)`,
+      `CREATE INDEX IF NOT EXISTS idx_scraping_jobs_type ON ${TABLE_NAME}(type)`,
+      `CREATE INDEX IF NOT EXISTS idx_scraping_jobs_created_at ON ${TABLE_NAME}(created_at DESC)`,
+    ];
+
+    for (const indexSql of indexes) {
+      await new Promise((resolve, reject) => {
+        db.run(indexSql, (err) => {
+          if (err) {
+            logger.error("Scraping jobs index creation failed:", err);
+            reject(err);
+          } else {
+            resolve();
+          }
+        });
+      });
+    }
+
+    logger.info("Scraping jobs table initialized");
+  } catch (error) {
+    logger.error("Error initializing scraping jobs table:", error);
+  }
+};
 
 class ScrapingService {
-  // Create a new scraping job
-  static createScrapingJob(jobData) {
-    const stmt = db.prepare(`
-      INSERT INTO scraping_jobs (
-        name, type, targets, filters, max_leads, is_active, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
+  static async createScrapingJob(jobData) {
+    try {
+      const job = {
+        name: jobData.name,
+        type: jobData.type,
+        targets: JSON.stringify(jobData.targets || []),
+        filters: JSON.stringify(jobData.filters || {}),
+        max_leads: jobData.maxLeads || 1000,
+        is_active: jobData.isActive !== undefined ? jobData.isActive : true,
+        status: jobData.status || "pending",
+        progress: 0,
+        completed_leads: 0,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
 
-    const info = stmt.run(
-      jobData.name,
-      jobData.type,
-      JSON.stringify(jobData.targets || []),
-      JSON.stringify(jobData.filters || {}),
-      jobData.maxLeads || 1000,
-      jobData.isActive !== undefined ? jobData.isActive : 1,
-      jobData.status || "pending"
-    );
+      const result = db.run(
+        `
+        INSERT INTO ${TABLE_NAME} (name, type, targets, filters, max_leads, is_active, status, progress, completed_leads, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+        [
+          job.name,
+          job.type,
+          job.targets,
+          job.filters,
+          job.max_leads,
+          job.is_active,
+          job.status,
+          job.progress,
+          job.completed_leads,
+          job.created_at,
+          job.updated_at,
+        ]
+      );
 
-    return info.lastInsertRowid;
+      return result.lastInsertRowid;
+    } catch (error) {
+      console.error("Error creating scraping job:", error);
+      throw error;
+    }
   }
 
-  // Get all scraping jobs
-  static getScrapingJobs(filters = {}) {
-    let query = "SELECT * FROM scraping_jobs WHERE 1=1";
-    const params = [];
+  static async getAllJobs() {
+    try {
+      const jobs = db.all(`
+        SELECT * FROM ${TABLE_NAME}
+        ORDER BY created_at DESC
+      `);
 
-    if (filters.type) {
-      query += " AND type = ?";
-      params.push(filters.type);
-    }
-
-    if (filters.status) {
-      query += " AND status = ?";
-      params.push(filters.status);
-    }
-
-    if (filters.isActive !== undefined) {
-      query += " AND is_active = ?";
-      params.push(filters.isActive ? 1 : 0);
-    }
-
-    query += " ORDER BY created_at DESC";
-
-    const stmt = db.prepare(query);
-    const jobs = stmt.all(...params);
-
-    return jobs.map((job) => ({
-      ...job,
-      targets: JSON.parse(job.targets || "[]"),
-      filters: JSON.parse(job.filters || "{}"),
-      isActive: !!job.is_active,
-    }));
-  }
-
-  // Get scraping job by ID
-  static getScrapingJobById(id) {
-    const stmt = db.prepare("SELECT * FROM scraping_jobs WHERE id = ?");
-    const job = stmt.get(id);
-
-    if (job) {
-      return {
+      return jobs.map((job) => ({
         ...job,
+        id: job.id,
         targets: JSON.parse(job.targets || "[]"),
         filters: JSON.parse(job.filters || "{}"),
-        isActive: !!job.is_active,
-      };
+        isActive: job.is_active,
+        maxLeads: job.max_leads,
+        completedLeads: job.completed_leads,
+        createdAt: job.created_at,
+        updatedAt: job.updated_at,
+      }));
+    } catch (error) {
+      console.error("Error getting scraping jobs:", error);
+      throw error;
     }
-
-    return null;
   }
 
-  // Update scraping job status
-  static updateJobStatus(id, status, completedLeads = null) {
-    const stmt = db.prepare(`
-      UPDATE scraping_jobs 
-      SET 
-        status = ?, 
-        completed_leads = COALESCE(?, completed_leads),
-        updated_at = CURRENT_TIMESTAMP,
-        completed_at = CASE WHEN ? = 'completed' THEN CURRENT_TIMESTAMP ELSE completed_at END
-      WHERE id = ?
-    `);
+  static async getJobById(id) {
+    try {
+      const job = db.get(`SELECT * FROM ${TABLE_NAME} WHERE id = ?`, [id]);
+      if (!job) return null;
 
-    const info = stmt.run(status, completedLeads, status, id);
-    return info.changes > 0;
+      return {
+        ...job,
+        id: job.id,
+        targets: JSON.parse(job.targets || "[]"),
+        filters: JSON.parse(job.filters || "{}"),
+        isActive: job.is_active,
+        maxLeads: job.max_leads,
+        completedLeads: job.completed_leads,
+        createdAt: job.created_at,
+        updatedAt: job.updated_at,
+      };
+    } catch (error) {
+      console.error("Error getting scraping job:", error);
+      throw error;
+    }
   }
 
-  // Update job progress
-  static updateJobProgress(id, progress, currentProgress = null) {
-    const stmt = db.prepare(`
-      UPDATE scraping_jobs 
-      SET 
-        progress = ?,
-        current_progress = ?,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `);
+  static async updateJob(id, updates) {
+    try {
+      const updateFields = [];
+      const values = [];
 
-    const info = stmt.run(progress, currentProgress, id);
-    return info.changes > 0;
+      if (updates.status !== undefined) {
+        updateFields.push("status = ?");
+        values.push(updates.status);
+      }
+      if (updates.progress !== undefined) {
+        updateFields.push("progress = ?");
+        values.push(updates.progress);
+      }
+      if (updates.completedLeads !== undefined) {
+        updateFields.push("completed_leads = ?");
+        values.push(updates.completedLeads);
+      }
+      if (updates.isActive !== undefined) {
+        updateFields.push("is_active = ?");
+        values.push(updates.isActive);
+      }
+
+      updateFields.push("updated_at = ?");
+      values.push(new Date().toISOString());
+      values.push(id);
+
+      db.run(
+        `
+        UPDATE ${TABLE_NAME}
+        SET ${updateFields.join(", ")}
+        WHERE id = ?
+      `,
+        values
+      );
+
+      return true;
+    } catch (error) {
+      console.error("Error updating scraping job:", error);
+      throw error;
+    }
   }
 
-  // Delete scraping job
-  static deleteScrapingJob(id) {
-    const stmt = db.prepare("DELETE FROM scraping_jobs WHERE id = ?");
-    const info = stmt.run(id);
-    return info.changes > 0;
-  }
-
-  // Toggle job active status
-  static toggleJobStatus(id) {
-    const stmt = db.prepare(`
-      UPDATE scraping_jobs 
-      SET 
-        is_active = NOT is_active,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `);
-
-    const info = stmt.run(id);
-    return info.changes > 0;
-  }
-
-  // Get job statistics
-  static getJobStats() {
-    const stmt = db.prepare(`
-      SELECT 
-        COUNT(*) as total,
-        SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END) as running,
-        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
-        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
-        SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as active,
-        SUM(completed_leads) as total_leads_found
-      FROM scraping_jobs
-    `);
-
-    return stmt.get();
-  }
-
-  // Get recent completed jobs
-  static getRecentCompletedJobs(limit = 5) {
-    const stmt = db.prepare(`
-      SELECT * FROM scraping_jobs 
-      WHERE status = 'completed' 
-      ORDER BY completed_at DESC 
-      LIMIT ?
-    `);
-
-    const jobs = stmt.all(limit);
-
-    return jobs.map((job) => ({
-      ...job,
-      targets: JSON.parse(job.targets || "[]"),
-      filters: JSON.parse(job.filters || "{}"),
-      isActive: !!job.is_active,
-    }));
-  }
-
-  // Update job error log
-  static updateJobError(id, errorMessage) {
-    const stmt = db.prepare(`
-      UPDATE scraping_jobs 
-      SET 
-        status = 'failed',
-        error_log = ?,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `);
-
-    const info = stmt.run(errorMessage, id);
-    return info.changes > 0;
+  static async deleteJob(id) {
+    try {
+      db.run(`DELETE FROM ${TABLE_NAME} WHERE id = ?`, [id]);
+      return true;
+    } catch (error) {
+      console.error("Error deleting scraping job:", error);
+      throw error;
+    }
   }
 }
+
+// Initialize on module load
+init().catch((err) => {
+  logger.error("Failed to initialize scraping:", err);
+});
 
 module.exports = ScrapingService;

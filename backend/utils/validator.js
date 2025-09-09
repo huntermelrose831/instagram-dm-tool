@@ -20,8 +20,11 @@ const schemas = {
 
   // DM schemas
   sendDM: Joi.object({
-    username: Joi.string()
-      .regex(/^[A-Za-z0-9._]{1,30}$/)
+    username: Joi.alternatives()
+      .try(
+        Joi.string().regex(/^[A-Za-z0-9._]{1,30}$/), // Instagram username format
+        Joi.string().email() // Email format
+      )
       .required(),
     usernames: Joi.array()
       .items(Joi.string().regex(/^[A-Za-z0-9._]{1,30}$/))

@@ -11,81 +11,72 @@ const SELECTORS = {
   ],
 
   MESSAGE_BOX: [
+    'div[contenteditable="true"][aria-label*="Message"]',
+    'div[contenteditable="true"][data-testid*="message"]',
     'textarea[placeholder="Message..."]',
     'input[placeholder="Message..."]',
     'div[contenteditable="true"][aria-label="Message"][role="textbox"]',
     'div[contenteditable="true"][placeholder="Message..."]',
+    'div[role="textbox"]',
   ],
 
   SEND_BUTTON: [
     'button[type="submit"]',
     'div[role="button"][aria-label="Send Message"]',
-    'div[role="button"] button:has-text("Send")',
+    'div[role="button"]:has-text("Send")',
+    'button:has-text("Send")',
     'button[type="button"]:not([disabled])',
     'div[role="button"]:not([disabled]):has-text("Send")',
-    '//*[@id=\"mount_0_0_ZO\"]/div/div/div[2]/div/div/div[1]/div[1]/div[1]/section/main/section/div/div/div/div[1]/div/div[2]/div/div/div[1]/div/div[2]/div[2]/div/div/div/div[3]',
+    '[data-testid="send-button"]',
   ],
 
   SEARCH_BOX: [
-    'div[role="dialog"] input[placeholder*="Search"]',
-    'input[type="text"]',
+    // Prioritize the specific search input for DM compose
+    'input[name="queryBox"]',
+    'input[placeholder="Search..."]',
+    'input[autocomplete="off"][placeholder="Search..."]',
+    // Fallback selectors
     'input[placeholder*="Search"]',
     'input[aria-label*="Search"]',
-    'input[name="queryBox"]',
+    'input[type="text"]',
+    'div[role="dialog"] input[placeholder*="Search"]',
+    'input[aria-label*="Search"]',
     'div[contenteditable="true"]',
   ],
 
   NOT_NOW_BUTTON: [
     "button._a9--._ap36._a9_1", // original, works in some login modals
     'button:has-text("Not Now")', // more flexible fallback
-    "#mount_0_0_ky > div > div > div.x9f619.x1n2onr6.x1ja2u2z > div > div > div.x78zum5.xdt5ytf.x1t2pt76.x1n2onr6.x1ja2u2z.x10cihs4 > div.x9f619.xvbhtw8.x78zum5.x168nmei.x13lgxp2.x5pf9jr.xo71vjh.x1uhb9sk.x1plvlek.xryxfnj.x1c4vz4f.x2lah0s.x1q0g3np.xqjyukv.x1qjc9v5.x1oa3qoh.x1qughib > div.x1gryazu.xh8yej3.x10o80wk.x14k21rp.x1v4esvl.x8vgawa > section > main > section > div > div > div > div.xjp7ctv > div > div.x9f619.x1n2onr6.x1ja2u2z.x78zum5.xdt5ytf.x2lah0s.x193iq5w.xeuugli.xvbhtw8 > div > div.x6s0dn4.x1bs97v6.x1q0q8m5.x9f619.xat24cr.xh8yej3.x1qhh985.x14z7g9a.xzbw6zd.x78zum5.x1q0g3np.x1qughib.xsag5q8.xbbxn1n.xxbr6pl.xijc0j3 > div.x78zum5.x13a6bvl.x1ye3gou > div > div > div > svg",
+    'button[type="button"]:has-text("Not Now")',
+    'div[role="button"]:has-text("Not Now")',
   ],
 
   SEARCH_RESULTS: [
+    'input[name="ContactSearchResultCheckbox"]',
+    'input[aria-label="Radio selection"]',
+    'input[type="checkbox"][aria-label*="selection"]',
+    'input[type="checkbox"][tabindex="-1"]',
     'input[aria-label*="Radio selection"][type="checkbox"]',
     'div[role="dialog"] div[role="none"] div[role="button"]',
     'div[role="dialog"] div[aria-label*="suggested"] div[role="button"]',
-    'div[role="dialog"] div[role="list"] div[role="listitem"]',
-    'div[role="dialog"] button:has(img)',
   ],
 
   CHAT_BUTTON: [
-    'div[role="button"] button:nth-child(2)',
-    'button[tabindex="0"]:has-text("Next")',
-    'button:has-text("Next")',
-    'div[role="dialog"] button[type="button"]',
-    'button[type="button"]:not([disabled])',
-    'div[role="dialog"] button:has-text("Send")',
+    // Specific class structure for Chat button
+    'div.x1i10hfl[role="button"]',
+    'div[role="button"]:has-text("Chat")',
+    'button:has-text("Chat")',
+    'button[type="button"]',
+    '[data-testid="chat-button"]',
+    'div[role="button"]',
   ],
+
   NEWMESSAGEBUTTON: [
     'svg[aria-label="New message"]',
-    'div[role="button"][aria-label="New message"]',
     'button[aria-label="New message"]',
+    'div[role="button"][aria-label="New message"]',
     'a[aria-label="New message"]',
-    // Alternative text labels
-    'svg[aria-label="New Message"]',
-    'div[role="button"][aria-label="New Message"]',
-    'button[aria-label="New Message"]',
-    // Look for compose/new/create buttons in DM context
-    'svg[aria-label*="Compose"]',
-    'div[role="button"][aria-label*="Compose"]',
-    'svg[aria-label*="Create"]',
-    'div[role="button"][aria-label*="Create"]',
-    // Generic new message patterns
-    'button:has-text("New message")',
-    'button:has-text("New Message")',
-    'div[role="button"]:has-text("New message")',
-    'div[role="button"]:has-text("New Message")',
-    // SVG icon-based fallbacks (common Instagram patterns)
-    'svg[viewBox="0 0 24 24"] + span:has-text("New")',
-    'div[role="button"] svg[viewBox="0 0 24 24"]',
-    // Path-based selectors for common Instagram locations
-    'header div[role="button"] svg',
-    'div[data-testid*="new"] svg',
-    'div[data-testid*="compose"] svg',
-    // Broader fallbacks if rate limited
-    'div[role="button"][tabindex="0"]',
-    'button[type="button"]:not([disabled])',
+    '[data-testid="new-message-button"]',
   ],
 
   DIRECT_MESSAGING_LINK: [
@@ -96,50 +87,81 @@ const SELECTORS = {
     'svg[aria-label="Messenger"]',
     'svg[aria-label="Direct"]',
   ],
+
+  // Authentication check selectors
+  LOGIN_FORM: [
+    'form#loginForm',
+    'input[name="username"]',
+    'input[aria-label*="username"]',
+    'input[placeholder*="username"]',
+  ],
+
+  LOGGED_IN_INDICATORS: [
+    'svg[aria-label="New post"]',
+    'svg[aria-label="Messenger"]',
+    'a[href*="/direct/"]',
+    'svg[aria-label="Home"]',
+    'svg[aria-label="Search"]',
+    'img[alt*="profile picture"]',
+    '[aria-label="Settings"]',
+  ],
 };
 
 /**
- * Tries multiple selectors until one works
- * @param {import('puppeteer').Page} page Puppeteer page
- * @param {string[]} selectors Array of selectors to try
- * @param {object} options Waiting options
- * @returns {Promise<string>} Working selector
+ * Helper function to find a working selector from an array of selectors
+ * @param {Object} page - Puppeteer page object
+ * @param {string[]} selectors - Array of CSS selectors to try
+ * @param {number} timeout - Total timeout in milliseconds
+ * @returns {Promise<ElementHandle>} The found element
  */
-async function findWorkingSelector(
-  page,
-  selectors,
-  options = { timeout: 5000 }
-) {
-  for (const selector of selectors) {
+async function findWorkingSelector(page, selectors, timeout = 5000) {
+  if (!page || page.isClosed()) {
+    throw new Error('Page is closed or detached');
+  }
+
+  const selectorArray = Array.isArray(selectors) ? selectors : [selectors];
+  const timeoutPerSelector = Math.max(1000, timeout / selectorArray.length);
+  
+  for (const selector of selectorArray) {
     try {
-      await page.waitForSelector(selector, options);
-      return selector;
+      console.log(`Trying selector: ${selector}`);
+      const element = await page.waitForSelector(selector, { 
+        timeout: timeoutPerSelector,
+        visible: true 
+      });
+      if (element) {
+        console.log(`✓ Found element with selector: ${selector}`);
+        return element;
+      }
     } catch (e) {
+      console.log(`✗ Selector failed: ${selector}`);
       continue;
     }
   }
-  throw new Error("No working selector found");
+  
+  throw new Error(`None of the selectors found: ${selectorArray.join(", ")}`);
 }
 
 /**
- * Checks if an element is actually interactable
- * @param {import('puppeteer').Page} page Puppeteer page
- * @param {string} selector Element selector
- * @returns {Promise<boolean>}
+ * Check if an element is interactable (visible and not disabled)
+ * @param {Object} page - Puppeteer page object
+ * @param {ElementHandle} element - The element to check
+ * @returns {Promise<boolean>} Whether the element is interactable
  */
-async function isElementInteractable(page, selector) {
-  return page.evaluate((sel) => {
-    const el = document.querySelector(sel);
-    if (!el) return false;
-
-    const style = window.getComputedStyle(el);
-    return (
-      style.display !== "none" &&
-      style.visibility !== "hidden" &&
-      style.opacity !== "0" &&
-      el.offsetParent !== null
-    );
-  }, selector);
+async function isElementInteractable(page, element) {
+  if (!element) return false;
+  
+  try {
+    const isVisible = await element.isIntersectingViewport();
+    const isEnabled = await page.evaluate(el => {
+      return !el.disabled && el.offsetParent !== null;
+    }, element);
+    
+    return isVisible && isEnabled;
+  } catch (error) {
+    console.warn('Error checking element interactability:', error.message);
+    return false;
+  }
 }
 
 module.exports = {

@@ -1,0 +1,286 @@
+const db = require("./db");
+const { ObjectId } = require("mongodb");
+
+const COLLECTION_NAME = "targets";
+
+const init = async () => {
+  try {
+    const collection = await db.getCollection(COLLECTION_NAME);
+    await collection.createIndex({ username: 1 }, { unique: true });
+    await collection.createIndex({ created_at: -1 });
+    await collection.createIndex({ is_active: 1 });
+    console.log("Targets collection initialized");
+  } catch (error) {
+    console.error("Error initializing targets collection:", error);
+  }
+};
+
+class TargetsService {
+  // Load all targets
+  static async loadTargets() {
+    try {
+      const targets = await db.find(
+        COLLECTION_NAME,
+        { is_active: true },
+        {
+          sort: { created_at: -1 },
+        }
+      );
+
+      return targets.map((target) => target.username);
+    } catch (error) {
+      console.error("Error loading targets:", error);
+      throw error;
+    }
+  }
+
+  // Get all targets with full details
+  static async getAllTargets() {
+    try {
+      const targets = await db.find(
+        COLLECTION_NAME,
+        { is_active: true },
+        {
+          sort: { created_at: -1 },
+        }
+      );
+
+      return targets.map((target) => ({
+        ...target,
+        id: target._id,
+      }));
+    } catch (error) {
+      console.error("Error getting all targets:", error);
+      throw error;
+    }
+  }
+
+  // Add a target
+  static async addTarget(username) {
+    try {
+      if (!username || typeof username !== "string") {
+        throw new Error("Username is required and must be a string");
+      }
+
+      // Check if target already exists
+      const existingTarget = await db.findOne(COLLECTION_NAME, { username });
+
+      if (existingTarget) {
+        if (!existingTarget.is_active) {
+          // Reactivate if it was previously deactivated
+          await db.updateOne(
+            COLLECTION_NAME,
+            { username },
+            {
+              $set: {
+                is_active: true,
+                updated_at: new Date(),
+              },
+            }
+          );
+        }
+        return await this.loadTargets();
+      }
+
+      // Create new target
+      const targetData = {
+        username: username.trim().toLowerCase(),
+        is_active: true,
+        created_at: new Date(),
+        updated_at: new Date(),
+      };
+
+      await db.insertOne(COLLECTION_NAME, targetData);
+      return await this.loadTargets();
+    } catch (error) {
+      console.error("Error adding target:", error);
+      throw error;
+    }
+  }
+
+  // Remove a target (soft delete)
+  static async removeTarget(username) {
+    try {
+      if (!username || typeof username !== "string") {
+        throw new Error("Username is required and must be a string");
+      }
+
+      await db.updateOne(
+        COLLECTION_NAME,
+        { username: username.trim().toLowerCase() },
+        {
+          $set: {
+            is_active: false,
+            updated_at: new Date(),
+          },
+        }
+      );
+
+      return await this.loadTargets();
+    } catch (error) {
+      console.error("Error removing target:", error);
+      throw error;
+    }
+  }
+
+  // Hard delete a target
+  static async deleteTarget(username) {
+    try {
+      if (!username || typeof username !== "string") {
+        throw new Error("Username is required and must be a string");
+      }
+
+      const result = await db.deleteOne(COLLECTION_NAME, {
+        username: username.trim().toLowerCase(),
+      });
+
+      return result.deletedCount > 0;
+    } catch (error) {
+      console.error("Error deleting target:", error);
+      throw error;
+    }
+  }
+
+  // Clear all targets (soft delete)
+  static async clearTargets() {
+    try {
+      await db.updateMany(
+        COLLECTION_NAME,
+        { is_active: true },
+        {
+          $set: {
+            is_active: false,
+            updated_at: new Date(),
+          },
+        }
+      );
+
+      return [];
+    } catch (error) {
+      console.error("Error clearing targets:", error);
+      throw error;
+    }
+  }
+
+  // Add multiple targets
+  static async addMultipleTargets(usernames) {
+    try {
+      if (!Array.isArray(usernames)) {
+        throw new Error("Usernames must be an array");
+      }
+
+      const results = [];
+      for (const username of usernames) {
+        if (username && typeof username === "string" && username.trim()) {
+          try {
+            await this.addTarget(username.trim());
+            results.push({ username: username.trim(), success: true });
+          } catch (error) {
+            results.push({
+              username: username.trim(),
+              success: false,
+              error: error.message,
+            });
+          }
+        }
+      }
+
+      return {
+        results,
+        targets: await this.loadTargets(),
+      };
+    } catch (error) {
+      console.error("Error adding multiple targets:", error);
+      throw error;
+    }
+  }
+
+  // Search targets
+  static async searchTargets(searchTerm) {
+    try {
+      if (!searchTerm) {
+        return await this.loadTargets();
+      }
+
+      const targets = await db.find(
+        COLLECTION_NAME,
+        {
+          is_active: true,
+          username: { $regex: searchTerm, $options: "i" },
+        },
+        {
+          sort: { created_at: -1 },
+        }
+      );
+
+      return targets.map((target) => target.username);
+    } catch (error) {
+      console.error("Error searching targets:", error);
+      throw error;
+    }
+  }
+
+  // Get target statistics
+  static async getTargetStats() {
+    try {
+      const collection = await db.getCollection(COLLECTION_NAME);
+
+      const stats = await collection
+        .aggregate([
+          {
+            $group: {
+              _id: null,
+              total_targets: { $sum: 1 },
+              active_targets: { $sum: { $cond: ["$is_active", 1, 0] } },
+              inactive_targets: { $sum: { $cond: ["$is_active", 0, 1] } },
+            },
+          },
+        ])
+        .toArray();
+
+      return (
+        stats[0] || {
+          total_targets: 0,
+          active_targets: 0,
+          inactive_targets: 0,
+        }
+      );
+    } catch (error) {
+      console.error("Error getting target stats:", error);
+      throw error;
+    }
+  }
+
+  // Migrate from file-based system
+  static async migrateFromFile(fileTargets) {
+    try {
+      if (!Array.isArray(fileTargets)) {
+        return { migrated: 0, errors: [] };
+      }
+
+      let migrated = 0;
+      const errors = [];
+
+      for (const username of fileTargets) {
+        try {
+          if (username && typeof username === "string" && username.trim()) {
+            await this.addTarget(username.trim());
+            migrated++;
+          }
+        } catch (error) {
+          errors.push({ username, error: error.message });
+        }
+      }
+
+      return { migrated, errors };
+    } catch (error) {
+      console.error("Error migrating targets from file:", error);
+      throw error;
+    }
+  }
+}
+
+// Initialize on module load
+init();
+
+module.exports = TargetsService;

@@ -36,22 +36,12 @@ A comprehensive Instagram direct messaging automation platform with advanced fea
 - **Interaction History**: Complete history of all interactions with leads
 - **Lead Qualification**: Automated lead scoring and qualification workflows
 
-### Analytics & Reporting
-
-- **Performance Dashboard**: Real-time analytics and performance metrics
-- **Campaign Analytics**: Detailed campaign performance tracking
-- **Engagement Metrics**: Track message open rates, response rates, and conversions
-- **Custom Reports**: Create custom reports with flexible filtering options
-- **Data Export**: Export data in multiple formats (CSV, Excel, PDF)
-- **Scheduled Reports**: Automated report generation and email delivery
-
 ### Team Collaboration
 
 - **User Management**: Invite and manage team members with role-based access
 - **Role-Based Permissions**: Granular permissions system for different user roles
 - **Shared Templates**: Share message templates and workflows across the team
 - **Workspaces**: Organize teams into separate workspaces
-- **Activity Logging**: Complete audit trail of all team activities
 
 ### Smart Automation
 

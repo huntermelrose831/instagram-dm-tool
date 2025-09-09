@@ -78,7 +78,7 @@ function setupEnvFile() {
       envPath,
       `PORT=5000
 NODE_ENV=development
-FRONTEND_URL=http://localhost:3000
+FRONTEND_URL=http://localhost:5174
 MAX_DMS_PER_DAY=50
 MAX_DMS_PER_HOUR=20
 LOG_LEVEL=info

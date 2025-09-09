@@ -46,6 +46,9 @@ const CRM = () => {
     inactive: "bg-gray-100 text-gray-800 border-gray-200",
   };
 
+  const API_BASE_URL =
+    import.meta.env.VITE_API_BASE_URL || "http://localhost:5001";
+
   useEffect(() => {
     fetchContacts();
   }, [filterStatus, filterTag]);
@@ -56,7 +59,9 @@ const CRM = () => {
       if (filterStatus) queryParams.append("status", filterStatus);
       if (filterTag) queryParams.append("tag", filterTag);
 
-      const response = await fetch(`/api/crm/contacts?${queryParams}`);
+      const response = await fetch(
+        `${API_BASE_URL}/api/crm/contacts?${queryParams}`
+      );
       const data = await response.json();
       if (data.status === "success") {
         setContacts(data.contacts || []);
@@ -99,7 +104,7 @@ const CRM = () => {
     if (!newContact.username.trim()) return;
 
     try {
-      const response = await fetch("/api/crm/contacts", {
+      const response = await fetch(`${API_BASE_URL}/api/crm/contacts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newContact),
@@ -118,11 +123,14 @@ const CRM = () => {
 
   const updateContactStatus = async (contactId, newStatus) => {
     try {
-      const response = await fetch(`/api/crm/contacts/${contactId}`, {
-        method: "PATCH", // changed from PUT to PATCH
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: newStatus }),
-      });
+      const response = await fetch(
+        `${API_BASE_URL}/api/crm/contacts/${contactId}`,
+        {
+          method: "PATCH", // changed from PUT to PATCH
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: newStatus }),
+        }
+      );
 
       if (response.ok) {
         fetchContacts();
@@ -141,9 +149,12 @@ const CRM = () => {
     const confirmDelete = window.confirm("Delete this contact permanently?");
     if (!confirmDelete) return;
     try {
-      const response = await fetch(`/api/crm/contacts/${contactId}`, {
-        method: "DELETE",
-      });
+      const response = await fetch(
+        `${API_BASE_URL}/api/crm/contacts/${contactId}`,
+        {
+          method: "DELETE",
+        }
+      );
       if (response.ok) {
         setContacts((prev) => prev.filter((c) => c.id !== contactId));
         if (selectedContact?.id === contactId) setSelectedContact(null);
@@ -161,7 +172,7 @@ const CRM = () => {
 
     try {
       const response = await fetch(
-        `/api/crm/contacts/${selectedContact.id}/notes`,
+        `${API_BASE_URL}/api/crm/contacts/${selectedContact.id}/notes`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },

@@ -1,0 +1,7 @@
+{
+  "context": {
+    "include": ["backend/", "instagram-dm-tool/", "shared/", "config/"],
+    "exclude": ["node_modules/", "dist/", ".git/"]
+  },
+  "allowFileEdits": true
+}

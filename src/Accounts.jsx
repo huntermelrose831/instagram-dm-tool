@@ -1,23 +1,3 @@
-  // Delete a proxy by ID
-  const deleteProxy = async (proxyId) => {
-    if (!window.confirm("Are you sure you want to delete this proxy?")) {
-      return;
-    }
-    try {
-      const response = await fetch(
-        `http://localhost:5000/api/account-safety/proxies/${proxyId}`,
-        {
-          method: "DELETE",
-        }
-      );
-      if (response.ok) {
-        fetchProxies();
-      }
-    } catch (error) {
-      console.error("Error deleting proxy:", error);
-    }
-  };
-import React, { useState, useEffect, useCallback } from "react";
 import {
   FaInstagram,
   FaPlus,
@@ -41,6 +21,7 @@ import {
   FaUserShield,
   FaServer,
 } from "react-icons/fa";
+import React, { useState, useEffect, useCallback } from "react";
 
 const Accounts = () => {
   // Main tab state
@@ -86,6 +67,10 @@ const Accounts = () => {
     followPerDay: 200,
     isActive: true,
   });
+
+  const API_BASE_URL =
+    import.meta.env.VITE_API_BASE_URL || "http://localhost:5001";
+
   useEffect(() => {
     fetchAccounts();
     if (
@@ -99,35 +84,13 @@ const Accounts = () => {
     }
   }, [activeTab]);
 
-  // Memoized handlers for form inputs
-  const handleNewAccountChange = useCallback((field, value) => {
-    setNewAccount((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
-  }, []);
-
-  const handleNewProxyChange = useCallback((field, value) => {
-    setNewProxy((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
-  }, []);
-
-  const handleNewRateLimitChange = useCallback((field, value) => {
-    setNewRateLimit((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
-  }, []);
-
   const fetchAccounts = async () => {
     try {
       setLoading(true);
-      const response = await fetch("/api/accounts");
+      const response = await fetch(`${API_BASE_URL}/api/accounts`);
       if (response.ok) {
         const data = await response.json();
-        setAccounts(data);
+        setAccounts(Array.isArray(data) ? data : data.accounts || []);
       }
     } catch (error) {
       console.error("Error fetching accounts:", error);
@@ -136,11 +99,10 @@ const Accounts = () => {
     }
   };
 
-  // Safety monitoring API functions
   const fetchSafetyAccounts = async () => {
     try {
       const response = await fetch(
-        "http://localhost:5000/api/account-safety/accounts"
+        `${API_BASE_URL}/api/account-safety/accounts`
       );
       if (response.ok) {
         const data = await response.json();
@@ -150,11 +112,16 @@ const Accounts = () => {
       console.error("Error fetching safety accounts:", error);
     }
   };
-
+  const handleNewAccountChange = (field, value) => {
+    setNewAccount((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  };
   const fetchProxies = async () => {
     try {
       const response = await fetch(
-        "http://localhost:5000/api/account-safety/proxies"
+        `${API_BASE_URL}/api/account-safety/proxies`
       );
       if (response.ok) {
         const data = await response.json();
@@ -168,7 +135,7 @@ const Accounts = () => {
   const fetchRateLimits = async () => {
     try {
       const response = await fetch(
-        "http://localhost:5000/api/account-safety/rate-limits"
+        `${API_BASE_URL}/api/account-safety/rate-limits`
       );
       if (response.ok) {
         const data = await response.json();
@@ -182,10 +149,14 @@ const Accounts = () => {
   const addProxy = async () => {
     try {
       const response = await fetch(
-        "http://localhost:5000/api/account-safety/proxies",
+        `${API_BASE_URL}/api/account-safety/proxies`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key":
+              "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
+          },
           body: JSON.stringify(newProxy),
         }
       );
@@ -209,10 +180,14 @@ const Accounts = () => {
   const addRateLimit = async () => {
     try {
       const response = await fetch(
-        "http://localhost:5000/api/account-safety/rate-limits",
+        `${API_BASE_URL}/api/account-safety/rate-limits`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key":
+              "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
+          },
           body: JSON.stringify(newRateLimit),
         }
       );
@@ -234,67 +209,30 @@ const Accounts = () => {
     }
   };
 
-  const updateRateLimit = async (rateLimitId, updates) => {
-    try {
-      const response = await fetch(
-        `http://localhost:5000/api/account-safety/rate-limits/${rateLimitId}`,
-        {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(updates),
-        }
-      );
-
-      if (response.ok) {
-        fetchRateLimits();
-        setEditingRateLimit(null);
-      }
-    } catch (error) {
-      console.error("Error updating rate limit:", error);
-    }
-  };
-
-  const deleteRateLimit = async (rateLimitId) => {
-    if (!window.confirm("Are you sure you want to delete this rate limit?")) {
+  // Delete a proxy by ID
+  const deleteProxy = async (proxyId) => {
+    if (!window.confirm("Are you sure you want to delete this proxy?")) {
       return;
     }
-
     try {
       const response = await fetch(
-        `http://localhost:5000/api/account-safety/rate-limits/${rateLimitId}`,
+        `${API_BASE_URL}/api/account-safety/proxies/${proxyId}`,
         {
           method: "DELETE",
         }
       );
-
       if (response.ok) {
-        fetchRateLimits();
+        fetchProxies();
       }
     } catch (error) {
-      console.error("Error deleting rate limit:", error);
-    }
-  };
-
-  const toggleAccountRotation = async (accountId, enabled) => {
-    try {
-      await fetch(
-        `http://localhost:5000/api/account-safety/accounts/${accountId}/rotation`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ enabled }),
-        }
-      );
-      fetchSafetyAccounts();
-    } catch (error) {
-      console.error("Error toggling account rotation:", error);
+      console.error("Error deleting proxy:", error);
     }
   };
 
   const performHealthCheck = async (accountId) => {
     try {
       const response = await fetch(
-        `http://localhost:5000/api/account-safety/health-check/${accountId}`
+        `${API_BASE_URL}/api/account-safety/health-check/${accountId}`
       );
       if (response.ok) {
         const data = await response.json();
@@ -309,13 +247,15 @@ const Accounts = () => {
   const handleAddAccount = async (e) => {
     e.preventDefault();
     setIsLoggingIn(true);
-    
+
     try {
       // Step 1: Add the account to database
-      const response = await fetch("/api/accounts", {
+      const response = await fetch(`${API_BASE_URL}/api/accounts`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "x-api-key":
+            "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
         },
         body: JSON.stringify(newAccount),
       });
@@ -323,32 +263,43 @@ const Accounts = () => {
       if (response.ok) {
         const createdAccount = await response.json();
         setAccounts([...accounts, createdAccount]);
-        
+
         // Step 2: Automatically login to Instagram and save cookies
         try {
-          const loginResponse = await fetch("/api/accounts/login", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              username: newAccount.username,
-              password: newAccount.password,
-            }),
-          });
+          const loginResponse = await fetch(
+            `${API_BASE_URL}/api/accounts/login`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "x-api-key":
+                  "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
+              },
+              body: JSON.stringify({
+                username: newAccount.username,
+                password: newAccount.password,
+              }),
+            }
+          );
 
           const loginResult = await loginResponse.json();
 
           if (loginResponse.ok) {
-            alert("✅ Account added successfully and logged in to Instagram! Ready to send DMs.");
+            alert(
+              "✅ Account added successfully and logged in to Instagram! Ready to send DMs."
+            );
           } else {
-            alert(`✅ Account added successfully, but Instagram login failed: ${loginResult.message}\nYou can try logging in again later.`);
+            alert(
+              `✅ Account added successfully, but Instagram login failed: ${loginResult.message}\nYou can try logging in again later.`
+            );
           }
         } catch (loginError) {
           console.error("Error during Instagram login:", loginError);
-          alert("✅ Account added successfully, but Instagram login failed. You can try logging in again later.");
+          alert(
+            "✅ Account added successfully, but Instagram login failed. You can try logging in again later."
+          );
         }
-        
+
         // Reset form and close
         setNewAccount({
           username: "",
@@ -375,9 +326,17 @@ const Accounts = () => {
     }
 
     try {
-      const response = await fetch(`/api/accounts/id/${accountId}`, {
-        method: "DELETE",
-      });
+      const response = await fetch(
+        `${API_BASE_URL}/api/accounts/id/${accountId}`,
+        {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key":
+              "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
+          },
+        }
+      );
 
       if (response.ok) {
         setAccounts(accounts.filter((account) => account.id !== accountId));
@@ -395,13 +354,18 @@ const Accounts = () => {
 
   const handleUpdateAccount = async (accountId, updates) => {
     try {
-      const response = await fetch(`/api/accounts/${accountId}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(updates),
-      });
+      const response = await fetch(
+        `${API_BASE_URL}/api/accounts/${accountId}`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key":
+              "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
+          },
+          body: JSON.stringify(updates),
+        }
+      );
 
       if (response.ok) {
         const updatedAccount = await response.json();
@@ -635,6 +599,7 @@ const Accounts = () => {
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500"
                       placeholder="@username"
                       required
+                      key="username-input"
                     />
                   </div>
                   <div>
@@ -650,6 +615,7 @@ const Accounts = () => {
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500"
                       placeholder="Password"
                       required
+                      key="password-input"
                     />
                   </div>
                   <div>
@@ -664,6 +630,7 @@ const Accounts = () => {
                       }
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500"
                       placeholder="proxy:port"
+                      key="proxy-input"
                     />
                   </div>
                   <div>
@@ -682,6 +649,7 @@ const Accounts = () => {
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500"
                       min="1"
                       max="100"
+                      key="daily-limit-input"
                     />
                   </div>
                   <div className="md:col-span-2">
@@ -696,12 +664,17 @@ const Accounts = () => {
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500"
                       rows="3"
                       placeholder="Additional notes about this account..."
+                      key="notes-textarea"
                     />
                   </div>
                   <div className="md:col-span-2 flex gap-4">
                     <button
                       type="submit"
-                      disabled={isLoggingIn || !newAccount.username || !newAccount.password}
+                      disabled={
+                        isLoggingIn ||
+                        !newAccount.username ||
+                        !newAccount.password
+                      }
                       className="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white px-6 py-2 rounded-lg font-medium transition-colors flex items-center gap-2"
                     >
                       {isLoggingIn ? (
@@ -1263,14 +1236,14 @@ const Accounts = () => {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                           <div className="flex space-x-2">
-                            <button 
+                            <button
                               onClick={() => setEditingRateLimit(limit)}
                               className="text-blue-600 hover:text-blue-900"
                               title="Edit Rate Limit"
                             >
                               <FaEdit />
                             </button>
-                            <button 
+                            <button
                               onClick={() => deleteRateLimit(limit.id)}
                               className="text-red-600 hover:text-red-900"
                               title="Delete Rate Limit"
@@ -1349,18 +1322,13 @@ const Accounts = () => {
                   </select>
                 </div>
 
-                <div className="flex justify-end gap-3 pt-4">
+                <div className="flex justify-end mt-3">
                   <button
-                    onClick={() => setShowAddModal(false)}
-                    className="px-4 py-2 text-gray-600 hover:text-gray-800"
+                    onClick={() => deleteProxy(proxy.id)}
+                    className="text-red-600 hover:text-red-900 flex items-center"
+                    title="Delete Proxy"
                   >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={addProxy}
-                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                  >
-                    Add Proxy
+                    <FaTrash className="mr-1" /> Delete
                   </button>
                 </div>
               </div>
@@ -1413,7 +1381,10 @@ const Accounts = () => {
                       type="number"
                       value={newRateLimit.dmPerHour}
                       onChange={(e) =>
-                        handleNewRateLimitChange("dmPerHour", parseInt(e.target.value))
+                        handleNewRateLimitChange(
+                          "dmPerHour",
+                          parseInt(e.target.value)
+                        )
                       }
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
                       min="1"
@@ -1428,7 +1399,10 @@ const Accounts = () => {
                       type="number"
                       value={newRateLimit.dmPerDay}
                       onChange={(e) =>
-                        handleNewRateLimitChange("dmPerDay", parseInt(e.target.value))
+                        handleNewRateLimitChange(
+                          "dmPerDay",
+                          parseInt(e.target.value)
+                        )
                       }
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
                       min="1"
@@ -1446,7 +1420,10 @@ const Accounts = () => {
                       type="number"
                       value={newRateLimit.followPerHour}
                       onChange={(e) =>
-                        handleNewRateLimitChange("followPerHour", parseInt(e.target.value))
+                        handleNewRateLimitChange(
+                          "followPerHour",
+                          parseInt(e.target.value)
+                        )
                       }
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
                       min="1"
@@ -1461,7 +1438,10 @@ const Accounts = () => {
                       type="number"
                       value={newRateLimit.followPerDay}
                       onChange={(e) =>
-                        handleNewRateLimitChange("followPerDay", parseInt(e.target.value))
+                        handleNewRateLimitChange(
+                          "followPerDay",
+                          parseInt(e.target.value)
+                        )
                       }
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
                       min="1"
@@ -1480,17 +1460,14 @@ const Accounts = () => {
                       }
                       className="mr-2"
                     />
-                    <span className="text-sm font-medium text-gray-700">Active</span>
+                    <span className="text-sm font-medium text-gray-700">
+                      Active
+                    </span>
                   </label>
                 </div>
 
                 <div className="flex justify-end gap-3 pt-4">
-                  <button
-                    onClick={() => setShowAddModal(false)}
-                    className="px-4 py-2 text-gray-600 hover:text-gray-800"
-                  >
-                    Cancel
-                  </button>
+                  <button onClick={() => setShowAddModal(false)}>Cancel</button>
                   <button
                     onClick={addRateLimit}
                     className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
@@ -1529,7 +1506,7 @@ const Accounts = () => {
                       onChange={(e) =>
                         setEditingRateLimit({
                           ...editingRateLimit,
-                          dmPerHour: parseInt(e.target.value)
+                          dmPerHour: parseInt(e.target.value),
                         })
                       }
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
@@ -1547,7 +1524,7 @@ const Accounts = () => {
                       onChange={(e) =>
                         setEditingRateLimit({
                           ...editingRateLimit,
-                          dmPerDay: parseInt(e.target.value)
+                          dmPerDay: parseInt(e.target.value),
                         })
                       }
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
@@ -1568,7 +1545,7 @@ const Accounts = () => {
                       onChange={(e) =>
                         setEditingRateLimit({
                           ...editingRateLimit,
-                          followPerHour: parseInt(e.target.value)
+                          followPerHour: parseInt(e.target.value),
                         })
                       }
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
@@ -1586,7 +1563,7 @@ const Accounts = () => {
                       onChange={(e) =>
                         setEditingRateLimit({
                           ...editingRateLimit,
-                          followPerDay: parseInt(e.target.value)
+                          followPerDay: parseInt(e.target.value),
                         })
                       }
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
@@ -1604,12 +1581,14 @@ const Accounts = () => {
                       onChange={(e) =>
                         setEditingRateLimit({
                           ...editingRateLimit,
-                          isActive: e.target.checked
+                          isActive: e.target.checked,
                         })
                       }
                       className="mr-2"
                     />
-                    <span className="text-sm font-medium text-gray-700">Active</span>
+                    <span className="text-sm font-medium text-gray-700">
+                      Active
+                    </span>
                   </label>
                 </div>
 
@@ -1621,7 +1600,9 @@ const Accounts = () => {
                     Cancel
                   </button>
                   <button
-                    onClick={() => updateRateLimit(editingRateLimit.id, editingRateLimit)}
+                    onClick={() =>
+                      updateRateLimit(editingRateLimit.id, editingRateLimit)
+                    }
                     className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
                   >
                     Save Changes
@@ -1635,5 +1616,4 @@ const Accounts = () => {
     </div>
   );
 };
-
 export default Accounts;

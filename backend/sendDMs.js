@@ -4,65 +4,59 @@ const puppeteer = require("puppeteer-extra");
 const StealthPlugin = require("puppeteer-extra-plugin-stealth");
 const AccountsService = require("./database/accounts");
 const { delay } = require("./utils/delay");
-const { SELECTORS } = require("./utils/selectors");
+const {
+  SELECTORS,
+  findWorkingSelector,
+  isElementInteractable,
+} = require("./utils/selectors");
 const { createContact, recordInteraction } = require("./database/crm");
-const { sendDMsMock } = require("./sendDMs-mock");
 const config = require("./config");
+
+// Mock DM sender for when Puppeteer fails
+const sendDMsMock = async ({
+  igUsername,
+  usernames,
+  message,
+  campaignId = null,
+  messageVariations = null,
+}) => {
+  console.log("🎭 MOCK DM SENDER ACTIVATED");
+  console.log(`Mock sending DMs from account: ${igUsername}`);
+
+  const targetsArray = Array.isArray(usernames)
+    ? usernames
+    : usernames
+        .split(/[\n,;]+/)
+        .map((t) => t.trim())
+        .filter(Boolean);
+
+  // Simulate processing time
+  await new Promise((resolve) => setTimeout(resolve, 2000));
+
+  // Mock success for demonstration
+  const mockResults = {
+    successCount: targetsArray.length,
+    responseCount: 0,
+    variationStats: messageVariations
+      ? messageVariations.map(() => ({ sent: 1, responses: 0 }))
+      : [],
+    rateLimitHits: 0,
+    errors: [],
+    totalTargets: targetsArray.length,
+    isMock: true,
+  };
+
+  console.log(
+    `🎭 Mock DM session complete: ${targetsArray.length} targets processed`
+  );
+  console.log("📝 Note: This was a simulation. No actual DMs were sent.");
+
+  return mockResults;
+};
 
 puppeteer.use(StealthPlugin());
 
-async function waitForAnySelector(page, selectors, timeout = 10000) {
-  if (!Array.isArray(selectors)) selectors = [selectors];
-
-  for (const selector of selectors) {
-    try {
-      const el = await page.waitForSelector(selector, { timeout });
-      if (el) return el;
-    } catch (_) {
-      // Try next selector
-    }
-  }
-  throw new Error(
-    `None of the selectors matched: ${JSON.stringify(selectors)}`
-  );
-}
-
-// New helper: ensure we are on the compose (new DM) screen without relying on the New Message button
-async function ensureComposeScreen(page) {
-  try {
-    if (!page.url().includes("/direct/new")) {
-      console.log("🔄 Navigating directly to compose screen (/direct/new)...");
-      await page.goto("https://www.instagram.com/direct/new", {
-        waitUntil: "domcontentloaded",
-        timeout: 20000,
-      });
-      await delay(1200 + Math.random() * 800);
-    }
-  } catch (e) {
-    console.warn(
-      "⚠️ Failed direct compose navigation, attempting inbox then compose:",
-      e.message
-    );
-    try {
-      await page.goto("https://www.instagram.com/direct/inbox/", {
-        waitUntil: "domcontentloaded",
-        timeout: 20000,
-      });
-      await delay(1000);
-      await page.goto("https://www.instagram.com/direct/new", {
-        waitUntil: "domcontentloaded",
-        timeout: 20000,
-      });
-      await delay(1000);
-    } catch (e2) {
-      console.warn(
-        "⚠️ Fallback compose navigation also failed; continuing and will retry later.",
-        e2.message
-      );
-    }
-  }
-}
-
+// Constants
 const DELAYS = {
   TYPING: config.dm.delays.typing,
   BETWEEN_MESSAGES: config.dm.delays.between,
@@ -75,10 +69,287 @@ const getRandomDelay = (min, max) =>
   Math.floor(Math.random() * (max - min + 1) + min);
 const MAX_RETRIES = config.dm.limits.maxRetries;
 const MAX_RATE_LIMIT_RETRIES = config.dm.limits.maxRateLimitRetries;
-const MAX_CONSECUTIVE_ERRORS = config.dm.limits.maxConsecutiveErrors; // Stop if we hit configured consecutive errors
+const MAX_CONSECUTIVE_ERRORS = config.dm.limits.maxConsecutiveErrors;
+
+// Helper functions
+const waitForAnySelector = async (page, selectors, timeout = 5000) => {
+  const selectorArray = Array.isArray(selectors) ? selectors : [selectors];
+
+  for (const selector of selectorArray) {
+    try {
+      const element = await page.waitForSelector(selector, {
+        timeout: timeout / selectorArray.length,
+      });
+      if (element) return element;
+    } catch (e) {
+      // Continue to next selector
+    }
+  }
+  throw new Error(`None of the selectors found: ${selectorArray.join(", ")}`);
+};
+
+// Enhanced compose screen function
+const ensureComposeScreen = async (page) => {
+  console.log("Ensuring compose screen is ready...");
+
+  if (!page || page.isClosed()) {
+    throw new Error("Page is closed or detached");
+  }
+
+  try {
+    // Check if we're already on the compose screen
+    const isOnCompose = await page.evaluate(() => {
+      return (
+        window.location.href.includes("/direct/new") ||
+        document.querySelector('input[placeholder*="Search"]') !== null ||
+        document.querySelector('input[aria-label*="Search"]') !== null
+      );
+    });
+
+    if (!isOnCompose) {
+      console.log("Looking for New Message button...");
+
+      try {
+        const newMessageButton = await findWorkingSelector(
+          page,
+          SELECTORS.NEWMESSAGEBUTTON,
+          10000
+        );
+        await newMessageButton.click();
+        console.log("🆕 Clicked New Message button");
+        await delay(3000);
+      } catch (error) {
+        console.log(
+          "ℹ️ New Message button not found quickly; trying navigation approach."
+        );
+
+        // Fallback: navigate directly
+        await page.goto("https://www.instagram.com/direct/new", {
+          waitUntil: "domcontentloaded",
+          timeout: 15000,
+        });
+        await delay(2000);
+      }
+    }
+  } catch (error) {
+    console.warn("Could not ensure compose screen:", error.message);
+    throw error;
+  }
+};
+
+// Enhanced user search and selection
+const searchAndSelectUser = async (page, username) => {
+  console.log(`Searching for user: ${username}`);
+
+  if (!page || page.isClosed()) {
+    throw new Error("Page is closed or detached");
+  }
+
+  try {
+    // Locate search box with fallback attempts
+    let searchBox;
+    try {
+      searchBox = await findWorkingSelector(page, SELECTORS.SEARCH_BOX, 4000);
+    } catch (e) {
+      console.log(
+        "Primary search box selectors failed; attempting fallback selector strategies."
+      );
+      const fallbackSelectors = [
+        'input[placeholder="Search..."]',
+        'input[aria-label*="Search"]',
+        'input[placeholder*="Search"]',
+        'input[dir="auto"][type="text"]',
+      ];
+      try {
+        searchBox = await waitForAnySelector(page, fallbackSelectors, 4000);
+      } catch (e2) {
+        throw new Error("Search box not found for composing new DM");
+      }
+    }
+
+    // Clear and type username
+    await searchBox.click({ clickCount: 3 }).catch(() => searchBox.click());
+    await page.keyboard.press("Backspace").catch(() => {});
+    await delay(400 + Math.random() * 400);
+    await searchBox.type(username, {
+      delay: getRandomDelay(DELAYS.TYPING.min, DELAYS.TYPING.max),
+    });
+    await delay(1200 + Math.random() * 600);
+
+    // Wait for search results and select user
+    console.log("Waiting for search results...");
+    const results = await waitForAnySelector(
+      page,
+      SELECTORS.SEARCH_RESULTS,
+      5000
+    ).catch(() => null);
+
+    if (results) {
+      console.log("Found search result, clicking...");
+      await results.click();
+      await delay(1000);
+    } else {
+      // Attempt alternative approach - look for the user in the dropdown
+      console.log("Trying alternative user selection approach...");
+      try {
+        // Wait for dropdown to appear
+        await page.waitForSelector('div[role="dialog"]', { timeout: 3000 });
+
+        // Look for the username in the dropdown using evaluate
+        const userFound = await page.evaluate((targetUsername) => {
+          // Find all elements that might contain the username
+          const elements = Array.from(
+            document.querySelectorAll("div, span, a")
+          );
+          for (const element of elements) {
+            if (
+              element.textContent &&
+              element.textContent.trim() === targetUsername
+            ) {
+              // Look for a clickable parent (button, div with role=button, etc.)
+              let clickableParent = element;
+              while (clickableParent && clickableParent !== document.body) {
+                if (
+                  clickableParent.tagName === "BUTTON" ||
+                  clickableParent.getAttribute("role") === "button" ||
+                  clickableParent.onclick ||
+                  clickableParent.style.cursor === "pointer"
+                ) {
+                  clickableParent.click();
+                  return true;
+                }
+                clickableParent = clickableParent.parentElement;
+              }
+              // If no clickable parent found, try clicking the element itself
+              element.click();
+              return true;
+            }
+          }
+          return false;
+        }, username);
+
+        if (!userFound) {
+          throw new Error("Could not locate search result for target user");
+        }
+
+        await delay(1000);
+      } catch (evalError) {
+        throw new Error("Could not locate search result for target user");
+      }
+    }
+
+    // Look for Chat button - fix the iteration issue
+    try {
+      // Wait for any button to appear
+      await page.waitForSelector('div[role="button"], button', {
+        timeout: 5000,
+      });
+
+      // Use the specific class structure from the HTML you provided
+      const chatButtonSelectors = [
+        // Exact class match for the Chat button you showed
+        'div.x1i10hfl.xjqpnuy.xc5r6h4.xqeqjp1.x1phubyo.x972fbf.x10w94by.x1qhh985.x14e42zd.xdl72j9.x2lah0s.x3ct3a4.xdj266r.x14z9mp.xat24cr.x1lziwak.x2lwn1j.xeuugli.xexx8yu.x18d9i69.x1hl2dhg.xggy1nq.x1ja2u2z.x1t137rt.x1q0g3np.x1lku1pv.x1a2a7pz.x6s0dn4.xjyslct.x1ejq31n.x18oe1m7.x1sy0etr.xstzfhl.x9f619.x9bdzbf.x1ypdohk.x78zum5.x1f6kntn.xwhw2v2.xl56j7k.x17ydfre.x1n2onr6.x2b8uid.xlyipyv.x87ps6o.x14atkfc.x5c86q.x18br7mf.x1i0vuye.x6nl9eh.x1a5l9x9.x7vuprf.x1mg3h75.xn3w4p2.x106a9eq.x1xnnf8n.x18cabeq.x158me93.xk4oym4.x1uugd1q[role="button"]',
+        // Fallback selectors
+        'div[role="button"]',
+        'button[type="button"]',
+        "button",
+      ];
+
+      let chatButtonFound = false;
+
+      // Try to find Chat button using text content
+      for (const selector of chatButtonSelectors) {
+        try {
+          const buttons = await page.$(selector);
+
+          for (const btn of buttons) {
+            try {
+              const text = await btn.evaluate((el) => el?.textContent?.trim());
+              if (text === "Chat") {
+                await btn.click();
+                chatButtonFound = true;
+                await delay(1500);
+                break;
+              }
+            } catch (btnError) {
+              continue;
+            }
+          }
+
+          if (chatButtonFound) break;
+        } catch (selectorError) {
+          continue;
+        }
+      }
+
+      if (!chatButtonFound) {
+        // Last resort: find any element with "Chat" text and try to click it
+        const chatButtonFound2 = await page.evaluate(() => {
+          // Find all elements containing "Chat" text
+          const walker = document.createTreeWalker(
+            document.body,
+            NodeFilter.SHOW_TEXT,
+            null,
+            false
+          );
+
+          let node;
+          while ((node = walker.nextNode())) {
+            if (node.textContent.trim() === "Chat") {
+              let element = node.parentElement;
+              // Walk up the DOM to find a clickable element
+              while (element && element !== document.body) {
+                if (
+                  element.tagName === "BUTTON" ||
+                  element.getAttribute("role") === "button" ||
+                  element.onclick ||
+                  window.getComputedStyle(element).cursor === "pointer"
+                ) {
+                  element.click();
+                  return true;
+                }
+                element = element.parentElement;
+              }
+            }
+          }
+          return false;
+        });
+
+        if (chatButtonFound2) {
+          chatButtonFound = true;
+          await delay(1500);
+        }
+      }
+
+      if (!chatButtonFound) {
+        // Continue anyway, sometimes the chat opens automatically
+      }
+    } catch (chatError) {
+      // Continue anyway, sometimes the chat opens automatically after selecting user
+    }
+  } catch (error) {
+    console.error(
+      `Error searching and selecting user ${username}:`,
+      error.message
+    );
+    throw error;
+  }
+};
+
+const checkForResponse = async (page, target) => {
+  console.log(`Checking for response from ${target}...`);
+  // Simplified response check - can be enhanced later
+  return false;
+};
+
+const updateCampaignStats = async (campaignId, stats) => {
+  console.log(`Updating campaign ${campaignId} stats:`, stats);
+  // Implementation for updating campaign stats
+};
 
 async function sendDMs({
   igEmail,
+  igUsername,
   usernames,
   message,
   campaignId = null,
@@ -89,6 +360,7 @@ async function sendDMs({
     if (global.metrics)
       global.metrics.dmStarts = (global.metrics.dmStarts || 0) + 1;
   } catch (_) {}
+
   const report = (stage, msg, percent, extra = {}) => {
     console.log(msg);
     try {
@@ -102,6 +374,7 @@ async function sendDMs({
         });
     } catch (_) {}
   };
+
   report("start", `Initializing DM automation...`, 0);
 
   // Add initial cooldown to avoid immediate rate limiting
@@ -111,7 +384,7 @@ async function sendDMs({
   let messagesSent = 0;
   let responseCount = 0;
   let rateLimitHits = 0;
-  let consecutiveErrors = 0; // Track consecutive errors for exponential backoff
+  let consecutiveErrors = 0;
   let errors = [];
   let variationStats = messageVariations
     ? messageVariations.map((v) => ({
@@ -128,35 +401,119 @@ async function sendDMs({
     );
     message = messageVariations[selectedVariationIndex];
   }
-  // Lookup by email only
-  const account = AccountsService.getAccountByEmail(igEmail);
-  if (
-    !account ||
-    !Array.isArray(account.cookies) ||
-    account.cookies.length === 0
-  ) {
-    // Fallback to mock if no cookies found
-    console.warn("No cookies found for this account. Using mock DM sender.");
+
+  // Better account lookup logic
+  let account = null;
+  const accountIdentifier = igEmail || igUsername;
+
+  console.log(`Looking for account with identifier: ${accountIdentifier}`);
+
+  if (!accountIdentifier) {
+    console.error("No account identifier provided (igEmail or igUsername)");
     return await sendDMsMock({
-      igEmail,
+      igEmail: accountIdentifier,
       usernames,
       message,
       campaignId,
       messageVariations,
     });
   }
+
+  // Try multiple lookup methods
+  try {
+    // First try by email
+    if (accountIdentifier.includes("@")) {
+      account = await AccountsService.getAccountByEmail(accountIdentifier);
+    }
+
+    // If not found, try by username
+    if (!account) {
+      account = await AccountsService.getAccountByUsername(accountIdentifier);
+    }
+
+    // If still not found, try the combined lookup
+    if (!account) {
+      account =
+        await AccountsService.getAccountByUsernameOrEmail(accountIdentifier);
+    }
+
+    // If still not found, try to find any account that matches
+    if (!account) {
+      const allAccounts = await AccountsService.getAccounts();
+
+      // Try to find a partial match
+      account = allAccounts.find(
+        (acc) =>
+          acc.username === accountIdentifier ||
+          acc.email === accountIdentifier ||
+          acc.username.includes(accountIdentifier) ||
+          (acc.email && acc.email.includes(accountIdentifier))
+      );
+    }
+
+    // Parse cookies from JSON string if they exist
+    if (account && account.cookies) {
+      try {
+        if (typeof account.cookies === "string") {
+          account.cookies = JSON.parse(account.cookies);
+        }
+      } catch (parseError) {
+        console.error("Error parsing cookies:", parseError);
+        account.cookies = null;
+      }
+    }
+  } catch (lookupError) {
+    console.error("Error during account lookup:", lookupError);
+  }
+
+  if (
+    !account ||
+    !Array.isArray(account.cookies) ||
+    account.cookies.length === 0
+  ) {
+    console.warn(
+      `No account found or no cookies available for: ${accountIdentifier}`
+    );
+    // Get available accounts for debugging
+    try {
+      const allAccounts = await AccountsService.getAccounts();
+      console.log(
+        "Available accounts:",
+        allAccounts.map((acc) => ({
+          username: acc.username,
+          email: acc.email,
+          hasCookies: acc.cookies && acc.cookies.length > 0,
+        }))
+      );
+    } catch (error) {
+      console.log("Error getting accounts for debugging:", error.message);
+    }
+
+    // Fallback to mock if no cookies found
+    return await sendDMsMock({
+      igEmail: accountIdentifier,
+      usernames,
+      message,
+      campaignId,
+      messageVariations,
+    });
+  }
+
+  console.log(
+    `✅ Found account: ${account.username} with ${account.cookies.length} cookies`
+  );
+
   let browser;
   try {
-    // WORKING CONFIG: Use the configuration we know works from diagnostics
     console.log(
       "Attempting to launch Puppeteer with working config (--no-sandbox)..."
     );
     report("launch_browser", "Connecting to Instagram...", 10);
     browser = await puppeteer.launch({
-      headless: false,
+      headless: true,
       args: ["--no-sandbox", "--disable-setuid-sandbox"],
-      timeout: 30000,
-      protocolTimeout: 120000, // Increase protocol timeout for cookie operations
+      timeout: 60000,
+      protocolTimeout: 120000,
     });
     console.log("✓ Working Puppeteer config successful");
   } catch (error) {
@@ -165,14 +522,13 @@ async function sendDMs({
       error.message
     );
     try {
-      // Fallback configuration with additional sandbox args
       console.log("Attempting fallback Puppeteer config...");
       browser = await puppeteer.launch({
-        headless: false,
+        headless: true,
         defaultViewport: null,
         args: ["--no-sandbox", "--disable-setuid-sandbox"],
-        timeout: 20000,
-        protocolTimeout: 20000,
+        timeout: 60000,
+        protocolTimeout: 60000,
       });
       console.log("✓ Fallback Puppeteer config successful");
     } catch (fallbackError) {
@@ -181,10 +537,9 @@ async function sendDMs({
         fallbackError.message
       );
       try {
-        // Extended configuration with more args
         console.log("Attempting extended Puppeteer config...");
         browser = await puppeteer.launch({
-          headless: false,
+          headless: true,
           defaultViewport: null,
           args: [
             "--no-sandbox",
@@ -193,8 +548,8 @@ async function sendDMs({
             "--disable-web-security",
             "--disable-features=VizDisplayCompositor",
           ],
-          timeout: 25000,
-          protocolTimeout: 25000,
+          timeout: 60000,
+          protocolTimeout: 60000,
         });
         console.log("✓ Extended Puppeteer config successful");
       } catch (extendedError) {
@@ -205,14 +560,9 @@ async function sendDMs({
         console.log(
           "🎭 FALLBACK: Using mock DM sender due to Puppeteer failure"
         );
-        console.log(
-          "💡 Run 'node diagnose-puppeteer.js' to diagnose Puppeteer issues"
-        );
 
-        // Use mock sender when Puppeteer completely fails
-        // Use mock sender when Puppeteer completely fails
         return await sendDMsMock({
-          igEmail,
+          igEmail: accountIdentifier,
           usernames,
           message,
           campaignId,
@@ -221,16 +571,17 @@ async function sendDMs({
       }
     }
   }
+
   const page = await browser.newPage();
   try {
-    await page.setDefaultNavigationTimeout(30000);
+    await page.setDefaultNavigationTimeout(60000);
 
     // Set user agent to avoid detection
     await page.setUserAgent(
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     );
 
-    // Navigate to Instagram home page first, with retry logic
+    // Navigate to Instagram home page first
     console.log("Loading Instagram...");
     report("navigate_home", "Loading Instagram...", 20);
     let homeLoaded = false;
@@ -238,7 +589,7 @@ async function sendDMs({
       try {
         await page.goto("https://www.instagram.com/", {
           waitUntil: "domcontentloaded",
-          timeout: 35000,
+          timeout: 60000,
         });
         homeLoaded = true;
       } catch (err) {
@@ -250,16 +601,12 @@ async function sendDMs({
       }
     }
 
-    // Set cookies in the correct domain context
-    console.log("Applying authentication cookies...");
+    // Set cookies
     report("set_cookies", "Authenticating account...", 30);
     let cookiesSet = 0;
-    const currentCookies = await page.cookies();
-    console.log(`Found ${currentCookies.length} existing cookies`);
 
     for (const cookie of account.cookies) {
       try {
-        // Ensure cookie is formatted correctly for Instagram domain
         const cleanCookie = {
           name: cookie.name,
           value: cookie.value,
@@ -277,7 +624,6 @@ async function sendDMs({
 
         await page.setCookie(cleanCookie);
         cookiesSet++;
-        console.log(`✓ Applied cookie: ${cookie.name}`);
       } catch (error) {
         console.warn(`Failed to set cookie ${cookie.name}:`, error.message);
       }
@@ -289,17 +635,14 @@ async function sendDMs({
       );
     }
 
-    console.log(`Applied ${cookiesSet} authentication cookies`);
-
-    // Navigate to Instagram again to use the cookies, with retry logic
-    console.log("Reloading Instagram with authentication...");
+    // Navigate to Instagram again to use the cookies
     report("auth_reload", "Verifying authentication...", 40);
     let authLoaded = false;
     for (let attempt = 1; attempt <= 2 && !authLoaded; attempt++) {
       try {
         await page.goto("https://www.instagram.com/", {
           waitUntil: "networkidle0",
-          timeout: 35000,
+          timeout: 60000,
         });
         authLoaded = true;
       } catch (err) {
@@ -315,47 +658,93 @@ async function sendDMs({
     await delay(4000);
 
     // Check authentication status with more reliable selectors
-    console.log("Verifying login status...");
     report("auth_check", "Checking login status...", 50);
+
+    // Wait a bit more for page to fully load
+    await delay(3000);
+
     const authCheck = await page.evaluate(() => {
       // Look for login form elements (indicates NOT logged in)
-      const loginForm =
-        document.querySelector("form#loginForm") ||
-        document.querySelector('input[name="username"]') ||
-        document.querySelector('input[aria-label*="username"]');
+      const loginSelectors = [
+        "form#loginForm",
+        'input[name="username"]',
+        'input[aria-label*="username"]',
+        'input[aria-label*="Phone number, username, or email"]',
+        'button[type="submit"]',
+      ];
+
+      const loginForm = loginSelectors.some(
+        (selector) => document.querySelector(selector) !== null
+      );
 
       // Look for logged-in elements (indicates logged in)
-      const loggedInElements = {
-        newPost: document.querySelector('svg[aria-label="New post"]'),
-        messages:
-          document.querySelector('svg[aria-label="Messenger"]') ||
-          document.querySelector('a[href*="/direct/"]'),
-        home: document.querySelector('svg[aria-label="Home"]'),
-        search: document.querySelector('svg[aria-label="Search"]'),
-        profile: document.querySelector('img[alt*="profile picture"]'),
-        settings: document.querySelector('[aria-label="Settings"]'),
+      const loggedInSelectors = {
+        newPost: [
+          'svg[aria-label="New post"]',
+          'a[href="#"]', // Sometimes the new post button
+          '[data-testid="new-post-button"]',
+        ],
+        messages: [
+          'svg[aria-label="Messenger"]',
+          'a[href*="/direct/"]',
+          '[data-testid="direct-link"]',
+        ],
+        home: [
+          'svg[aria-label="Home"]',
+          'a[href="/"]',
+          '[data-testid="home-link"]',
+        ],
+        search: [
+          'svg[aria-label="Search"]',
+          'input[placeholder*="Search"]',
+          '[data-testid="search-input"]',
+        ],
+        profile: ['img[alt*="profile picture"]', '[data-testid="user-avatar"]'],
+        navigation: [
+          'nav[role="navigation"]',
+          '[data-testid="mobile-nav-bar"]',
+        ],
       };
 
-      const loggedInCount = Object.values(loggedInElements).filter(
-        (el) => el !== null
-      ).length;
-      const hasLoginForm = !!loginForm;
+      const loggedInElements = {};
+      let loggedInCount = 0;
+
+      Object.entries(loggedInSelectors).forEach(([key, selectors]) => {
+        const found = selectors.some(
+          (selector) => document.querySelector(selector) !== null
+        );
+        loggedInElements[key] = found;
+        if (found) loggedInCount++;
+      });
+
+      // Additional checks
+      const hasInstagramLogo =
+        document.querySelector('img[alt="Instagram"]') !== null;
+      const hasMainContent =
+        document.querySelector("main") !== null ||
+        document.querySelector('[role="main"]') !== null;
+
+      // Check URL
+      const currentUrl = window.location.href;
+      const isOnLoginPage =
+        currentUrl.includes("/accounts/login") || currentUrl.includes("/login");
 
       return {
-        hasLoginForm,
+        hasLoginForm: loginForm,
         loggedInCount,
-        loggedInElements: Object.fromEntries(
-          Object.entries(loggedInElements).map(([key, el]) => [key, !!el])
-        ),
-        isLoggedIn: !hasLoginForm && loggedInCount >= 2,
+        loggedInElements,
+        hasInstagramLogo,
+        hasMainContent,
+        currentUrl,
+        isOnLoginPage,
+        isLoggedIn:
+          !loginForm && !isOnLoginPage && loggedInCount >= 2 && hasMainContent,
       };
     });
 
-    console.log("Authentication check results:", authCheck);
-
     if (authCheck.isLoggedIn) {
-      console.log("✅ Successfully authenticated with Instagram!");
-    } else if (authCheck.hasLoginForm) {
+      // Authentication successful - reduced logging
+    } else if (authCheck.hasLoginForm || authCheck.isOnLoginPage) {
       console.error(
         "❌ Still seeing login form - cookies may be expired or invalid"
       );
@@ -366,38 +755,25 @@ async function sendDMs({
       console.warn("⚠️ Authentication unclear - will attempt to continue");
     }
 
-    console.log("Navigating to Instagram DM page...");
     report("navigate_dm", "Opening messaging interface...", 60);
     try {
       await page.goto("https://www.instagram.com/direct/new", {
         waitUntil: "networkidle2",
-        timeout: 20000, // 20 second timeout
+        timeout: 60000,
       });
-      console.log("✓ Successfully navigated to Instagram DM page");
     } catch (navigationError) {
-      console.warn(
-        "Navigation to Instagram DM page failed, trying fallback..."
-      );
       try {
         await page.goto("https://www.instagram.com/direct/new", {
           waitUntil: "domcontentloaded",
-          timeout: 15000, // Even shorter timeout with different wait condition
+          timeout: 60000,
         });
-        console.log("✓ Successfully navigated to Instagram DM page (fallback)");
       } catch (fallbackError) {
-        console.warn(
-          "Fallback navigation also failed, trying basic navigation..."
-        );
         try {
           await page.goto("https://www.instagram.com/direct/new", {
-            timeout: 10000,
+            timeout: 60000,
           });
-          console.log("✓ Successfully navigated to Instagram DM page (basic)");
         } catch (basicError) {
-          console.error(
-            "All navigation attempts failed. DM sending may still work if we're already on Instagram."
-          );
-          // Don't throw here - let's try to continue with DM sending
+          // Continue anyway - DM sending may still work
         }
       }
     }
@@ -424,7 +800,21 @@ async function sendDMs({
       let success = false;
 
       // Create or update contact in CRM
-      const contact = createContact(target);
+      let contact = null;
+      try {
+        contact = await createContact(target);
+        if (!contact || !contact.id) {
+          console.warn(
+            `⚠️ Failed to create/get contact for ${target} - contact.id is missing`
+          );
+        }
+      } catch (contactError) {
+        console.warn(
+          `⚠️ Error creating contact for ${target}:`,
+          contactError.message
+        );
+        contact = null;
+      }
 
       while (retryCount <= MAX_RETRIES && !success) {
         try {
@@ -436,13 +826,13 @@ async function sendDMs({
           ).catch(() => null);
           if (notNowBtn) await notNowBtn.click();
 
-          // Ensure we are on compose screen; avoid hard failure on NEWMESSAGEBUTTON selectors
+          // Ensure we are on compose screen
           await ensureComposeScreen(page);
 
-          // Try clicking NEW MESSAGE button only if present quickly; otherwise proceed (Instagram sometimes auto-opens compose)
+          // Try clicking NEW MESSAGE button only if present quickly; otherwise proceed
           let clickedNewMessageButton = false;
           try {
-            const newMessageButton = await waitForAnySelector(
+            const newMessageButton = await findWorkingSelector(
               page,
               SELECTORS.NEWMESSAGEBUTTON,
               3000
@@ -459,71 +849,8 @@ async function sendDMs({
             );
           }
 
-          // Locate search box with fallback attempts
-          let searchBox;
-          try {
-            searchBox = await waitForAnySelector(
-              page,
-              SELECTORS.SEARCH_BOX,
-              4000
-            );
-          } catch (e) {
-            console.log(
-              "Primary search box selectors failed; attempting fallback selector strategies."
-            );
-            const fallbackSelectors = [
-              'input[placeholder="Search..."]',
-              'input[aria-label*="Search"]',
-              'input[placeholder*="Search"]',
-              'input[dir="auto"][type="text"]',
-            ];
-            try {
-              searchBox = await waitForAnySelector(
-                page,
-                fallbackSelectors,
-                4000
-              );
-            } catch (e2) {
-              throw new Error("Search box not found for composing new DM");
-            }
-          }
-
-          await searchBox
-            .click({ clickCount: 3 })
-            .catch(() => searchBox.click());
-          await page.keyboard.press("Backspace").catch(() => {});
-          await delay(400 + Math.random() * 400);
-          await searchBox.type(target, {
-            delay: getRandomDelay(DELAYS.TYPING.min, DELAYS.TYPING.max),
-          });
-          await delay(1200 + Math.random() * 600);
-
-          const results = await waitForAnySelector(
-            page,
-            SELECTORS.SEARCH_RESULTS
-          ).catch(() => null);
-          if (results) {
-            await results.click().catch(() => {});
-          } else {
-            // Attempt XPath exact match fallback
-            const xpathHandles = await page.$x(`//div[text() = '${target}']`);
-            if (xpathHandles.length) {
-              await xpathHandles[0].click();
-            } else {
-              throw new Error("Could not locate search result for target user");
-            }
-          }
-
-          const chatButtons = await page.$$('div[role="button"]');
-          for (const btn of chatButtons) {
-            try {
-              const text = await btn.evaluate((el) => el?.innerText?.trim());
-              if (text === "Chat") {
-                await btn.click();
-                break;
-              }
-            } catch (_) {}
-          }
+          // Search and select user
+          await searchAndSelectUser(page, target);
 
           const messageBox = await waitForAnySelector(
             page,
@@ -551,7 +878,20 @@ async function sendDMs({
             { target }
           );
           // Record message sent in CRM
-          recordInteraction(contact.id, "dm_sent", message, campaignId);
+          try {
+            if (contact && contact.id) {
+              recordInteraction(contact.id, "dm_sent", message, campaignId);
+            } else {
+              console.warn(
+                `⚠️ Cannot record interaction: contact.id is null for ${target}`
+              );
+            }
+          } catch (crmError) {
+            console.warn(
+              `⚠️ Failed to record CRM interaction for ${target}:`,
+              crmError.message
+            );
+          }
 
           // Prepare for next target (lightweight navigation)
           if (targetIndex < targetsArray.length) {
@@ -576,7 +916,24 @@ async function sendDMs({
               variationStats[selectedVariationIndex].responses++;
             }
             // Record response in CRM
-            recordInteraction(contact.id, "dm_received", "Received response");
+            try {
+              if (contact && contact.id) {
+                recordInteraction(
+                  contact.id,
+                  "dm_received",
+                  "Received response"
+                );
+              } else {
+                console.warn(
+                  `⚠️ Cannot record response interaction: contact.id is null for ${target}`
+                );
+              }
+            } catch (crmError) {
+              console.warn(
+                `⚠️ Failed to record CRM response interaction for ${target}:`,
+                crmError.message
+              );
+            }
           }
 
           console.log(`DM to ${target} completed successfully.`);
@@ -621,7 +978,7 @@ async function sendDMs({
             );
             await page.goto("https://www.instagram.com/direct/inbox/", {
               waitUntil: "networkidle2",
-              timeout: 30000,
+              timeout: 60000,
             });
             await delay(5000);
 
@@ -744,25 +1101,6 @@ async function sendDMs({
     try {
       await browser?.close();
     } catch (_) {}
-  }
-}
-
-// Check for response by navigating to the conversation with the target (still uses username for DM thread URL)
-async function checkForResponse(page, target) {
-  try {
-    await page.goto(`https://www.instagram.com/direct/t/${target}`, {
-      waitUntil: "networkidle2",
-      timeout: 10000,
-    });
-    await delay(2000);
-    const theirMessages = await page.$$eval(
-      ".message-from-them",
-      (msgs) => msgs.length
-    );
-    return theirMessages > 0;
-  } catch (error) {
-    console.warn("Error checking for response (non-critical):", error.message);
-    return false;
   }
 }
 

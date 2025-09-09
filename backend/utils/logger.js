@@ -1,9 +1,10 @@
 const winston = require("winston");
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 
 // Ensure logs directory exists
-const logDir = path.join(__dirname, "../logs");
+const logDir = path.join(os.tmpdir(), "instagram-dm-tool", "logs");
 try {
   if (!fs.existsSync(logDir)) {
     fs.mkdirSync(logDir, { recursive: true });
@@ -60,7 +61,7 @@ const transports = [
   }),
   // File transport for errors only
   new winston.transports.File({
-    filename: path.join(__dirname, "../logs/error.log"),
+    filename: path.join(logDir, "error.log"),
     level: "error",
     format: fileFormat,
     maxsize: 5242880, // 5MB
@@ -68,7 +69,7 @@ const transports = [
   }),
   // File transport for important logs only (info and above)
   new winston.transports.File({
-    filename: path.join(__dirname, "../logs/combined.log"),
+    filename: path.join(logDir, "combined.log"),
     level: "info",
     format: fileFormat,
     maxsize: 5242880, // 5MB

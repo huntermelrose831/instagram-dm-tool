@@ -17,34 +17,133 @@ import {
 } from "react-icons/md";
 
 const ReportingExport = () => {
+  // Delete report handler
+  const handleDeleteReport = async (reportId) => {
+    if (!window.confirm("Are you sure you want to delete this report?")) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/reports/${reportId}`, {
+        method: "DELETE",
+        headers: {
+          "X-API-KEY":
+            "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
+        },
+      });
+      if (res.ok) {
+        fetchReports();
+      } else {
+        const errorData = await res.json();
+        alert(`Error deleting report: ${errorData.error}`);
+      }
+    } catch (e) {
+      alert("Unexpected error deleting report.");
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+  // Export report handler
+  const handleExportReport = async (reportId, format = "csv") => {
+    setLoading(true);
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/api/reports/${reportId}/export`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-API-KEY":
+              "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
+          },
+          body: JSON.stringify({ format }),
+        }
+      );
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `report-${reportId}.${format === "excel" ? "csv" : format}`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+      } else {
+        const errorData = await res.json();
+        alert(`Error exporting report: ${errorData.error}`);
+      }
+    } catch (e) {
+      alert("Unexpected error exporting report.");
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
   const { reportsState, setReportsState } = useReportsState();
 
-  // Use context state instead of local state
+  // Use context state with proper defaults to prevent undefined errors
   const {
-    activeTab,
-    reports,
-    scheduledReports,
-    exportJobs,
-    showReportBuilder,
-    reportConfig,
-  } = reportsState;
+    activeTab = "reports",
+    reports = [],
+    scheduledReports = [],
+    exportJobs = [], // Ensure this is always an array
+    showReportBuilder = false,
+    reportConfig = {
+      name: "",
+      type: "standard",
+      dateRange: "last_30_days",
+      metrics: [],
+      filters: {},
+      visualization: "table",
+      format: "csv",
+      schedule: { frequency: "manual", time: "09:00", days: [] },
+    },
+  } = reportsState || {};
 
-  // Local state for loading and API data
   const [loading, setLoading] = useState(false);
 
-  // Helper functions to update context state
-  const updateState = (updates) => {
-    setReportsState({ ...reportsState, ...updates });
-  };
-
-  const setActiveTab = (tab) => updateState({ activeTab: tab });
-  const setReports = (reports) => updateState({ reports });
+  // Direct context update helpers
+  const setActiveTab = (tab) => setReportsState({ activeTab: tab });
+  const setReports = (reports) => setReportsState({ reports: reports || [] });
   const setScheduledReports = (scheduledReports) =>
-    updateState({ scheduledReports });
-  const setExportJobs = (exportJobs) => updateState({ exportJobs });
+    setReportsState({ scheduledReports: scheduledReports || [] });
+  const setExportJobs = (exportJobs) =>
+    setReportsState({ exportJobs: exportJobs || [] });
   const setShowReportBuilder = (show) =>
-    updateState({ showReportBuilder: show });
-  const setReportConfig = (config) => updateState({ reportConfig: config });
+    setReportsState({ showReportBuilder: show });
+  const setReportConfig = (config) => setReportsState({ reportConfig: config });
+
+  // Add missing handleCreateReport function
+  const handleCreateReport = async () => {
+    setLoading(true);
+    try {
+      // Send reportConfig to backend to create a report
+      const res = await fetch(`${API_BASE_URL}/api/reports/create`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-KEY":
+            "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
+        },
+        body: JSON.stringify(reportConfig),
+      });
+      if (res.ok) {
+        // Optionally refresh reports list
+        fetchReports();
+        setShowReportBuilder(false);
+      } else {
+        const errorData = await res.json();
+        alert(`Error creating report: ${errorData.error}`);
+      }
+    } catch (e) {
+      alert("Unexpected error creating report.");
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+  const API_BASE_URL =
+    import.meta.env.VITE_API_BASE_URL || "http://localhost:5001";
 
   useEffect(() => {
     fetchReports();
@@ -61,112 +160,125 @@ const ReportingExport = () => {
 
   const fetchReports = async () => {
     try {
-      const res = await fetch("/api/reports");
+      const res = await fetch(`${API_BASE_URL}/api/reports`, {
+        headers: {
+          "X-API-KEY":
+            "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
+        },
+      });
       const data = await res.json();
       setReports(data.reports || []);
     } catch (e) {
-      console.error(e);
-    }
-  };
-  const fetchScheduled = async () => {
-    try {
-      const res = await fetch("/api/reports/scheduled");
-      const data = await res.json();
-      setScheduledReports(data.scheduledReports || []);
-    } catch (e) {
-      console.error(e);
-    }
-  };
-  const fetchExportJobs = async () => {
-    try {
-      const res = await fetch("/api/exports/jobs");
-      const data = await res.json();
-      setExportJobs(data.jobs || []);
-    } catch (e) {
-      console.error(e);
+      console.error("Error fetching reports:", e);
+      setReports([]);
     }
   };
 
-  const handleCreateReport = async () => {
-    if (!reportConfig.name || reportConfig.metrics.length === 0) return;
-    setLoading(true);
+  const fetchScheduled = async () => {
     try {
-      await fetch("/api/reports/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(reportConfig),
+      const res = await fetch(`${API_BASE_URL}/api/reports/scheduled`, {
+        headers: {
+          "X-API-KEY":
+            "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
+        },
       });
-      setShowReportBuilder(false);
-      setReportConfig({
-        name: "",
-        type: "standard",
-        dateRange: "last_30_days",
-        metrics: [],
-        filters: {},
-        visualization: "table",
-        format: "csv",
-        schedule: { frequency: "manual", time: "09:00", days: [] },
-      });
-      fetchReports();
-      fetchScheduled();
+      const data = await res.json();
+      setScheduledReports(data.scheduledReports || []);
     } catch (e) {
-      console.error(e);
+      console.error("Error fetching scheduled reports:", e);
+      setScheduledReports([]);
+    }
+  };
+
+  const fetchExportJobs = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/exports/jobs`, {
+        headers: {
+          "X-API-KEY":
+            "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
+        },
+      });
+      const data = await res.json();
+      setExportJobs(data.jobs || []);
+    } catch (e) {
+      console.error("Error fetching export jobs:", e);
+      setExportJobs([]);
+    }
+  };
+
+  // Update the handleStartExport function to work with the export jobs system
+  const handleStartExport = async (type) => {
+    try {
+      setLoading(true);
+      // For all export types, use the backend endpoint
+      await fetch(`${API_BASE_URL}/api/exports/start`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-API-KEY":
+            "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
+        },
+        body: JSON.stringify({ type, format: "csv" }),
+      });
+      // Refresh the list of jobs to show the new one
+      fetchExportJobs();
+    } catch (e) {
+      console.error("Error starting export:", e);
     } finally {
       setLoading(false);
     }
   };
-
-  const handleRunReport = async (id) => {
+  const handleRunReport = async (reportId) => {
     try {
-      await fetch(`/api/reports/${id}/run`, { method: "POST" });
+      setLoading(true);
+      const res = await fetch(`${API_BASE_URL}/api/reports/${reportId}/run`, {
+        method: "POST",
+        headers: {
+          "X-API-KEY":
+            "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
+        },
+      });
+      const data = await res.json();
+      // Optionally refresh reports after running
       fetchReports();
-    } catch (e) {
-      console.error(e);
+      setLoading(false);
+    } catch (err) {
+      setLoading(false);
+      alert("Failed to run report: " + err.message);
     }
   };
-
-  const handleExportReport = async (id, format = "csv") => {
+  // Update the download handler in the exports table
+  const handleDownload = async (job) => {
+    // All job types will be handled by the same download logic
     try {
-      const res = await fetch(`/api/reports/${id}/export`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ format }),
-      });
+      const res = await fetch(
+        `${API_BASE_URL}/api/exports/jobs/${job.id}/download`,
+        {
+          headers: {
+            "X-API-KEY":
+              "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
+          },
+        }
+      );
       if (res.ok) {
         const blob = await res.blob();
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `report-${id}.${format === "excel" ? "csv" : format}`;
+        a.download = job.file_path || `export-${job.id}.csv`;
+        document.body.appendChild(a);
         a.click();
+        document.body.removeChild(a);
         window.URL.revokeObjectURL(url);
+      } else {
+        // Handle cases where the file is not ready or an error occurred
+        const errorData = await res.json();
+        console.error("Error downloading file:", errorData.error);
+        alert(`Could not download file: ${errorData.error}`);
       }
     } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const handleDeleteReport = async (id) => {
-    if (!window.confirm("Delete this report?")) return;
-    try {
-      await fetch(`/api/reports/${id}`, { method: "DELETE" });
-      fetchReports();
-      fetchScheduled();
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const handleStartExport = async (type) => {
-    try {
-      await fetch("/api/exports/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type, format: "csv" }),
-      });
-      fetchExportJobs();
-    } catch (e) {
-      console.error(e);
+      console.error("Error downloading:", e);
+      alert("An unexpected error occurred during download.");
     }
   };
 
@@ -175,6 +287,20 @@ const ReportingExport = () => {
     { id: "leads_generated", label: "Leads Generated" },
     { id: "conversion_rate", label: "Conversion Rate" },
   ];
+
+  // Add loading state
+  if (loading && (!reports || reports.length === 0)) {
+    return (
+      <div className="p-6 max-w-7xl mx-auto">
+        <div className="flex items-center justify-center h-64">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-gray-600">Loading reports...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -224,7 +350,7 @@ const ReportingExport = () => {
                 <MdBarChart className="text-blue-600 mr-3" size={24} />
                 <div>
                   <div className="text-2xl font-bold text-gray-900">
-                    {reports.length}
+                    {reports?.length || 0}
                   </div>
                   <div className="text-sm text-gray-600">Total Reports</div>
                 </div>
@@ -235,7 +361,7 @@ const ReportingExport = () => {
                 <MdSchedule className="text-green-600 mr-3" size={24} />
                 <div>
                   <div className="text-2xl font-bold text-gray-900">
-                    {scheduledReports.length}
+                    {scheduledReports?.length || 0}
                   </div>
                   <div className="text-sm text-gray-600">Scheduled</div>
                 </div>
@@ -246,7 +372,8 @@ const ReportingExport = () => {
                 <MdFileDownload className="text-purple-600 mr-3" size={24} />
                 <div>
                   <div className="text-2xl font-bold text-gray-900">
-                    {exportJobs.filter((j) => j.status === "completed").length}
+                    {exportJobs?.filter((j) => j.status === "completed")
+                      ?.length || 0}
                   </div>
                   <div className="text-sm text-gray-600">Exports Complete</div>
                 </div>
@@ -257,7 +384,7 @@ const ReportingExport = () => {
                 <MdTrendingUp className="text-orange-600 mr-3" size={24} />
                 <div>
                   <div className="text-2xl font-bold text-gray-900">
-                    {reports.filter((r) => r.last_generated).length}
+                    {reports?.filter((r) => r.last_generated)?.length || 0}
                   </div>
                   <div className="text-sm text-gray-600">Reports Generated</div>
                 </div>
@@ -291,13 +418,13 @@ const ReportingExport = () => {
             </div>
           </div>
 
-          {/* Reports Table */}
+          {/* Reports Table (using context) */}
           <div className="bg-white border border-gray-200 rounded-lg">
             <div className="p-4 border-b border-gray-200">
               <h2 className="text-lg font-semibold text-gray-900">Reports</h2>
             </div>
 
-            {reports.length === 0 ? (
+            {reports?.length === 0 ? (
               <div className="p-8 text-center">
                 <MdBarChart className="mx-auto text-gray-400 mb-4" size={48} />
                 <h3 className="text-lg font-medium text-gray-900 mb-2">
@@ -336,7 +463,7 @@ const ReportingExport = () => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-200">
-                    {reports.map((r) => (
+                    {reports?.map((r) => (
                       <tr key={r.id} className="hover:bg-gray-50">
                         <td className="px-4 py-3">
                           <div>
@@ -612,13 +739,13 @@ const ReportingExport = () => {
                 <div className="flex items-center space-x-2">
                   <MdSchedule className="text-blue-600" size={20} />
                   <span className="text-sm text-gray-600">
-                    {scheduledReports.length} scheduled
+                    {scheduledReports?.length || 0} scheduled
                   </span>
                 </div>
               </div>
             </div>
 
-            {scheduledReports.length === 0 ? (
+            {scheduledReports?.length === 0 ? (
               <div className="p-8 text-center">
                 <MdSchedule className="mx-auto text-gray-400 mb-4" size={48} />
                 <h3 className="text-lg font-medium text-gray-900 mb-2">
@@ -636,7 +763,7 @@ const ReportingExport = () => {
               </div>
             ) : (
               <div className="divide-y divide-gray-200">
-                {scheduledReports.map((report) => (
+                {scheduledReports?.map((report) => (
                   <div key={report.id} className="p-4">
                     <div className="flex items-center justify-between mb-3">
                       <div>
@@ -824,7 +951,7 @@ const ReportingExport = () => {
               </div>
             </div>
 
-            {exportJobs.length === 0 ? (
+            {exportJobs?.length === 0 ? (
               <div className="p-8 text-center">
                 <MdFileDownload
                   className="mx-auto text-gray-400 mb-4"
@@ -839,105 +966,108 @@ const ReportingExport = () => {
               </div>
             ) : (
               <div className="p-4 space-y-4">
-                {exportJobs.map((job) => (
-                  <div
-                    key={job.id}
-                    className="border border-gray-200 rounded-lg p-4 hover:shadow-sm transition-shadow"
-                  >
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center space-x-3">
-                        <div
-                          className={`w-3 h-3 rounded-full ${
-                            job.status === "completed"
-                              ? "bg-green-500"
-                              : job.status === "processing"
-                                ? "bg-blue-500 animate-pulse"
-                                : job.status === "error"
-                                  ? "bg-red-500"
-                                  : "bg-gray-400"
-                          }`}
-                        ></div>
-                        <div>
-                          <h3 className="font-medium text-gray-900 capitalize">
-                            {job.type} Export
-                          </h3>
-                          <div className="flex items-center space-x-2 text-sm text-gray-600">
-                            <span>Job #{job.id}</span>
-                            <span>•</span>
-                            <span>{job.format?.toUpperCase()}</span>
-                            {job.record_count && (
-                              <>
-                                <span>•</span>
-                                <span>{job.record_count} records</span>
-                              </>
-                            )}
+                {Array.isArray(exportJobs) &&
+                  exportJobs.map((job) => (
+                    <div
+                      key={job.id}
+                      className="border border-gray-200 rounded-lg p-4 hover:shadow-sm transition-shadow"
+                    >
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center space-x-3">
+                          <div
+                            className={`w-3 h-3 rounded-full ${
+                              job.status === "completed"
+                                ? "bg-green-500"
+                                : job.status === "processing"
+                                  ? "bg-blue-500 animate-pulse"
+                                  : job.status === "error"
+                                    ? "bg-red-500"
+                                    : "bg-gray-400"
+                            }`}
+                          ></div>
+                          <div>
+                            <h3 className="font-medium text-gray-900 capitalize">
+                              {job.type === "leads"
+                                ? "Leads Export"
+                                : `${job.type} Export`}
+                            </h3>
+                            <div className="flex items-center space-x-2 text-sm text-gray-600">
+                              <span>Job #{job.id}</span>
+                              <span>•</span>
+                              <span>{job.format?.toUpperCase()}</span>
+                              {job.record_count && (
+                                <>
+                                  <span>•</span>
+                                  <span>{job.record_count} records</span>
+                                </>
+                              )}
+                            </div>
                           </div>
                         </div>
+                        <span
+                          className={`px-3 py-1 rounded-full text-sm font-medium capitalize ${
+                            job.status === "completed"
+                              ? "bg-green-100 text-green-800"
+                              : job.status === "processing"
+                                ? "bg-blue-100 text-blue-800"
+                                : job.status === "error"
+                                  ? "bg-red-100 text-red-800"
+                                  : "bg-gray-100 text-gray-800"
+                          }`}
+                        >
+                          {job.status}
+                        </span>
                       </div>
-                      <span
-                        className={`px-3 py-1 rounded-full text-sm font-medium capitalize ${
-                          job.status === "completed"
-                            ? "bg-green-100 text-green-800"
-                            : job.status === "processing"
-                              ? "bg-blue-100 text-blue-800"
-                              : job.status === "error"
-                                ? "bg-red-100 text-red-800"
-                                : "bg-gray-100 text-gray-800"
-                        }`}
-                      >
-                        {job.status}
-                      </span>
-                    </div>
 
-                    {/* Progress Bar for Processing Jobs */}
-                    {job.status === "processing" && (
-                      <div className="mb-3">
-                        <div className="flex items-center justify-between text-sm text-gray-600 mb-2">
-                          <span>Progress</span>
-                          <span>{job.progress}%</span>
+                      {/* Progress Bar for Processing Jobs */}
+                      {job.status === "processing" && (
+                        <div className="mb-3">
+                          <div className="flex items-center justify-between text-sm text-gray-600 mb-2">
+                            <span>Progress</span>
+                            <span>{job.progress}%</span>
+                          </div>
+                          <div className="w-full bg-gray-200 rounded-full h-2">
+                            <div
+                              className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                              style={{ width: `${job.progress}%` }}
+                            ></div>
+                          </div>
                         </div>
-                        <div className="w-full bg-gray-200 rounded-full h-2">
-                          <div
-                            className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                            style={{ width: `${job.progress}%` }}
-                          ></div>
-                        </div>
-                      </div>
-                    )}
+                      )}
 
-                    {/* Error Message */}
-                    {job.status === "error" && job.error && (
-                      <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg">
-                        <div className="text-sm text-red-700">
-                          <strong>Error:</strong> {job.error}
+                      {/* Error Message */}
+                      {job.status === "error" && job.error && (
+                        <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+                          <div className="text-sm text-red-700">
+                            <strong>Error:</strong> {job.error}
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      )}
 
-                    {/* Job Details and Actions */}
-                    <div className="flex items-center justify-between text-sm">
-                      <div className="text-gray-600">
-                        Created: {new Date(job.created_at).toLocaleString()}
-                        {job.completed_at && (
-                          <span className="ml-4">
-                            Completed:{" "}
-                            {new Date(job.completed_at).toLocaleString()}
-                          </span>
+                      {/* Job Details and Actions */}
+                      <div className="flex items-center justify-between text-sm">
+                        <div className="text-gray-600">
+                          Created: {new Date(job.created_at).toLocaleString()}
+                          {job.completed_at && (
+                            <span className="ml-4">
+                              Completed:{" "}
+                              {new Date(job.completed_at).toLocaleString()}
+                            </span>
+                          )}
+                        </div>
+
+                        {job.status === "completed" && job.file_path && (
+                          <button
+                            onClick={() => handleDownload(job)}
+                            className="p-1 text-green-600 hover:text-green-800 hover:bg-green-50 rounded"
+                            title="Download"
+                          >
+                            <MdFileDownload size={18} />
+                          </button>
                         )}
                       </div>
-
-                      {job.status === "completed" && job.file_path && (
-                        <a
-                          href={`/api/exports/jobs/${job.id}/download`}
-                          className="inline-flex items-center text-blue-600 hover:text-blue-800 font-medium"
-                        >
-                          <MdFileDownload className="mr-1" size={16} />
-                          Download
-                        </a>
-                      )}
                     </div>
-                  </div>
-                ))}
+                  ))}
               </div>
             )}
           </div>
@@ -1186,6 +1316,7 @@ const ReportingExport = () => {
                 <button
                   disabled={
                     !reportConfig.name ||
+                    !reportConfig.metrics ||
                     reportConfig.metrics.length === 0 ||
                     loading
                   }
