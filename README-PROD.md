@@ -1,108 +1,82 @@
-# Instagram DM Tool
+# Instagram DM Tool - Production Notes
 
-A robust tool for automating Instagram direct messages, lead management, and engagement tracking.
+This document covers production-relevant details for the Electron desktop application.
 
-## Features
+## Supported Platforms
 
-- **Direct Message Management**: Send, schedule, and track Instagram DMs
-- **Lead Generation**: Scrape and manage potential leads from Instagram
-- **Account Management**: Manage multiple Instagram accounts with safety features
-- **CRM Functionality**: Track relationships with contacts
-- **Reporting & Analytics**: Track engagement and message effectiveness
-
-## Production Readiness Features
-
-- **Security**: Helmet for HTTP headers, proper input validation, and sanitization
-- **Reliability**: Comprehensive error handling and logging
-- **Performance**: Database optimization and connection pooling
-- **Monitoring**: Health check endpoints for container orchestration
-- **Maintenance**: Automated database backup and cleanup
+- Windows 10+ (64-bit) — distributed as `.exe` installer
+- Linux (Ubuntu 18.04+) — distributed as `.AppImage` or `.deb`
+- macOS is not supported
 
 ## Tech Stack
 
-- **Frontend**: React, TailwindCSS, Chart.js, React Router
-- **Backend**: Node.js, Express, SQLite, Puppeteer
-- **DevOps**: Docker, Docker Compose, Nginx
+- **Frontend**: React 19, Tailwind CSS, Chart.js, React Router 7, Framer Motion
+- **Backend**: Node.js, Express 4, SQLite3, Puppeteer (stealth), node-cron, Socket.io, Winston
+- **Desktop**: Electron, electron-builder
 
-## Getting Started
+## Building for Production
 
-### Development Environment
+Install all dependencies first:
 
-1. Clone the repository:
+```bash
+npm install
+cd backend && npm install && cd ..
+```
 
-   ```
-   git clone https://github.com/yourusername/instagram-dm-tool.git
-   cd instagram-dm-tool
-   ```
+Build and package:
 
-2. Install dependencies:
+```bash
+# Current platform
+bash build-app.sh
 
-   ```
-   # Install frontend dependencies
-   npm install
+# Windows specifically
+bash build-app.sh win
 
-   # Install backend dependencies
-   cd backend
-   npm install
-   cd ..
-   ```
+# Linux specifically
+bash build-app.sh linux
+```
 
-3. Create a `.env` file in the backend directory:
+Output is placed in `dist-electron/`.
 
-   ```
-   cp backend/.env.example backend/.env
-   ```
+## Environment Configuration
 
-4. Start the development servers:
+Create `backend/.env` before running or packaging:
 
-   ```
-   # In one terminal, start the frontend
-   npm run dev
+| Variable    | Default        | Description               |
+| ----------- | -------------- | ------------------------- |
+| `PORT`      | `5001`         | Backend API port          |
+| `DATA_DIR`  | `backend/data` | SQLite database directory |
+| `NODE_ENV`  | `production`   | Environment               |
+| `LOG_LEVEL` | `warn`         | Winston log level         |
 
-   # In another terminal, start the backend
-   cd backend
-   npm start
-   ```
+In the packaged Electron app, the backend process runs as a child process of the main Electron process. The `DATA_DIR` defaults to a directory inside the user's app data folder so data persists across updates.
 
-### Production Deployment
+## Security
 
-Using Docker Compose:
-
-1. Configure environment variables:
-
-   ```
-   cp backend/.env.example backend/.env
-   # Edit .env with your production settings
-   ```
-
-2. Build and run with Docker Compose:
-
-   ```
-   docker-compose up -d
-   ```
-
-3. Access the application:
-   - Frontend: http://localhost:3000
-   - Backend API: http://localhost:5000
-
-## Security Considerations
-
-- All user inputs are validated and sanitized
-- Rate limiting is implemented to prevent abuse
-- Secure HTTP headers are set
-- Password hashing is used for credentials
-- API endpoints have proper error handling
-- Input validation prevents SQL injection
+- HTTP headers hardened via Helmet
+- All API inputs validated with Joi and sanitized with sanitize-html
+- Express rate limiting on all routes
+- Additional rate limiting on unknown/unmatched routes to slow scanners
+- Winston access logs written to the OS temp directory
 
 ## Database Maintenance
 
-A scheduled database backup runs daily. You can also run it manually:
+Run a manual database backup at any time:
 
+```bash
+cd backend && node backup-db.js
 ```
-cd backend
-node backup-db.js
-```
+
+The backup script copies the SQLite database file to a timestamped file in the same data directory.
+
+## Logs
+
+Logs are written to the OS temp directory under `instagram-dm-tool/logs/`:
+
+- `main.log` — Electron main process log
+- `access.log` — HTTP access log (Morgan)
+- `app.log` — Application log (Winston)
 
 ## License
 
-Copyright (c) 2025. All rights reserved.
+Commercial - see [LICENSE.txt](LICENSE.txt) for details.

@@ -1,6 +1,8 @@
 # Instagram DM Tool - Distribution Guide
 
-## 🚀 Professional Desktop Application
+## Supported Platforms
+
+Windows and Linux only. macOS is not supported.
 
 Transform your Instagram marketing with our powerful automation tool that helps you:
 
@@ -12,7 +14,7 @@ Transform your Instagram marketing with our powerful automation tool that helps 
 
 ---
 
-## 📦 Installation
+## Installation
 
 ### Windows
 
@@ -23,10 +25,7 @@ Transform your Instagram marketing with our powerful automation tool that helps 
 
 ### macOS
 
-1. Download `Instagram DM Tool-1.0.0.dmg`
-2. Open the DMG file
-3. Drag the app to Applications folder
-4. Launch from Applications or Launchpad
+**macOS is not currently supported.** The application does not run on macOS due to compatibility issues with the Puppeteer/Chromium automation layer used for Instagram interactions. Windows and Linux are the supported platforms.
 
 ### Linux
 
@@ -43,7 +42,7 @@ Transform your Instagram marketing with our powerful automation tool that helps 
 
 ---
 
-## 🎯 Getting Started
+## Getting Started
 
 ### 1. First Launch
 
@@ -72,7 +71,7 @@ Transform your Instagram marketing with our powerful automation tool that helps 
 
 ---
 
-## ⚡ Key Features
+## Key Features
 
 ### Lead Generation
 
@@ -104,7 +103,7 @@ Transform your Instagram marketing with our powerful automation tool that helps 
 
 ---
 
-## 🛡️ Safety Features
+## Safety Features
 
 - **Rate Limiting**: Automatic delays to mimic human behavior
 - **Account Protection**: Built-in safeguards against bans
@@ -113,12 +112,12 @@ Transform your Instagram marketing with our powerful automation tool that helps 
 
 ---
 
-## 🔧 System Requirements
+## System Requirements
 
 ### Minimum Requirements
 
 - **Windows**: Windows 10 (64-bit)
-- **macOS**: macOS 10.14 Mojave
+- **macOS**: Not supported
 - **Linux**: Ubuntu 18.04+ or equivalent
 - **RAM**: 4GB minimum, 8GB recommended
 - **Storage**: 500MB available space
@@ -133,7 +132,7 @@ Transform your Instagram marketing with our powerful automation tool that helps 
 
 ---
 
-## 📞 Support
+## Support
 
 ### Getting Help
 
@@ -151,7 +150,7 @@ Transform your Instagram marketing with our powerful automation tool that helps 
 
 ---
 
-## 📄 License
+## License
 
 This software is licensed for commercial use. Each license permits installation on one computer. For multiple installations or team licenses, contact sales.
 
@@ -164,9 +163,9 @@ This software is licensed for commercial use. Each license permits installation 
 
 ---
 
-## 🚀 Ready to Get Started?
+## Ready to Get Started?
 
-1. **Download** the installer for your operating system
+1. **Download** the installer for your operating system (Windows or Linux)
 2. **Install** following the instructions above
 3. **Launch** the application
 4. **Add** your first Instagram account

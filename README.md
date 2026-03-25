@@ -1,192 +1,194 @@
-# Instagram DM Automation Tool
+# Instagram DM Tool
 
-A comprehensive Instagram direct messaging automation platform with advanced features for lead generation, account management, team collaboration, and analytics.
+A desktop application for Instagram direct messaging automation, lead generation, and account management. Built with Electron, React, and a Node.js/Express backend.
 
-## 🚀 Features
+## Screenshots
 
-### Core Messaging & Automation
+![Dashboard](assets/icons/Screenshot%20from%202026-03-25%2010-59-27.png)
 
-- **Automated DM Sending**: Send personalized direct messages to targeted users
-- **Smart Scheduling**: Schedule messages with intelligent timing and rate limiting
-- **Auto-Responders**: Set up automated responses based on keywords and triggers
-- **Follow-up Sequences**: Create multi-step automated follow-up campaigns
-- **Message Templates**: Save and reuse message templates with variable substitution
+![Messaging](assets/icons/Screenshot%20from%202026-03-25%2010-59-46.png)
 
-### Advanced Targeting & Scraping
+![Leads & Targets](assets/icons/Screenshot%20from%202026-03-25%2011-00-02.png)
 
-- **Competitor Analysis**: Scrape and analyze competitor followers
-- **Hashtag Targeting**: Target users based on hashtag interactions
-- **Location-Based Targeting**: Target users by geographic location
-- **Engagement Filtering**: Filter prospects by engagement levels and activity
-- **Lead Scoring**: Automatically score leads based on multiple criteria
+## How It Works
 
-### Account Management & Safety
+The app is packaged as an Electron desktop application. When launched, Electron spawns the Node.js/Express backend as a child process (running on port 5001) and loads the React frontend in a Chromium window. The frontend communicates with the backend over a local HTTP API (`/api/*`). During development, Vite's dev server proxies `/api` requests to the backend.
 
-- **Multi-Account Support**: Manage multiple Instagram accounts simultaneously
-- **Proxy Integration**: Use rotating proxies for enhanced anonymity
-- **Rate Limiting**: Intelligent rate limiting to avoid account restrictions
-- **Account Health Monitoring**: Track account status and prevent blocks
-- **Security Settings**: Advanced security configurations and safety protocols
+Instagram interactions are performed through Puppeteer with the stealth plugin, which controls a headless Chromium instance to send DMs, scrape followers/hashtags/keywords, and monitor message replies. All data is persisted in a local SQLite database stored in the app's data directory.
 
-### CRM & Lead Management
+## Features
 
-- **Lead Tracking**: Comprehensive lead management and tracking system
-- **Contact Organization**: Organize contacts with tags, notes, and custom fields
-- **Pipeline Management**: Visual sales pipeline with drag-and-drop functionality
-- **Interaction History**: Complete history of all interactions with leads
-- **Lead Qualification**: Automated lead scoring and qualification workflows
+- **Messaging**: Send DMs manually or schedule them with configurable rate limits and delays
+- **Targets**: Build and manage lists of Instagram users to message
+- **Leads**: Track scraped users through a status pipeline (new, contacted, replied, converted)
+- **Accounts**: Manage multiple Instagram accounts with per-account rate limit tracking and proxy assignment
+- **CRM**: Log interactions and notes against contacts
+- **Reports**: Export messaging activity, lead data, and account stats
+- **Team Collaboration**: Role-based user access with shared data
 
-### Team Collaboration
-
-- **User Management**: Invite and manage team members with role-based access
-- **Role-Based Permissions**: Granular permissions system for different user roles
-- **Shared Templates**: Share message templates and workflows across the team
-- **Workspaces**: Organize teams into separate workspaces
-
-### Smart Automation
-
-- **Trigger-Based Actions**: Set up complex automation workflows with multiple triggers
-- **Conditional Logic**: Create sophisticated automation rules with if/then logic
-- **A/B Testing**: Test different message variants and optimize performance
-- **Performance Tracking**: Monitor automation effectiveness with detailed metrics
-- **Machine Learning**: AI-powered optimization suggestions
-
-## 🛠️ Technology Stack
+## Technology Stack
 
 ### Frontend
 
-- **React 19**: Modern React with hooks and functional components
-- **React Router**: Client-side routing for single-page application
-- **Tailwind CSS**: Utility-first CSS framework for responsive design
-- **React Icons**: Comprehensive icon library
-- **Chart.js & Recharts**: Data visualization and charting libraries
-- **Framer Motion**: Smooth animations and transitions
+- React 19 with React Router 7
+- Tailwind CSS
+- Chart.js, Recharts
+- Framer Motion
+- React Icons
 
 ### Backend
 
-- **Node.js**: JavaScript runtime for server-side development
-- **Express.js**: Web application framework for Node.js
-- **SQLite**: Lightweight database for data storage
-- **Puppeteer**: Browser automation for Instagram interactions
-- **Apify**: Web scraping and data extraction platform
-- **Rate Limiting**: Built-in rate limiting and throttling
+- Node.js with Express 4
+- SQLite3 (via `sqlite3` package)
+- Puppeteer + `puppeteer-extra-plugin-stealth` for Instagram automation
+- `node-cron` for scheduled DM jobs
+- Socket.io for real-time status updates
+- Winston for logging
+- Helmet, express-rate-limit for security
 
-### Key Libraries
+### Desktop
 
-- **react-router-dom**: Navigation and routing
-- **react-icons**: Icon components
-- **chart.js**: Data visualization
-- **puppeteer**: Browser automation
-- **apify-client**: Web scraping integration
-- **cors**: Cross-origin resource sharing
-- **dotenv**: Environment variable management
+- Electron (main process spawns backend, loads Vite-built frontend)
+- electron-builder for packaging to AppImage (Linux) and .exe (Windows)
+- macOS is not supported
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 instagram-dm-tool/
-├── src/                          # Frontend source code
-│   ├── components/              # React components
-│   │   ├── Home.jsx            # Dashboard and overview
-│   │   ├── Messaging.jsx       # Message sending interface
-│   │   ├── SmartAutomation.jsx # Automation workflow builder
-│   │   ├── AccountSafety.jsx   # Account management and security
-│   │   ├── AdvancedTargeting.jsx # Targeting and scraping tools
-│   │   ├── Analytics.jsx       # Analytics dashboard
-│   │   ├── ReportingExport.jsx # Reporting and export system
-│   │   ├── TeamCollaboration.jsx # Team management
-│   │   ├── CRM.jsx            # Customer relationship management
-│   │   ├── Campaigns.jsx      # Campaign management
-│   │   ├── Leads.jsx          # Lead management
-│   │   ├── Targets.jsx        # Target management
-│   │   ├── Accounts.jsx       # Account settings
-│   │   └── Navbar.jsx         # Navigation component
-│   ├── App.jsx                 # Main application component
-│   ├── main.jsx               # Application entry point
-│   └── index.css              # Global styles
-├── backend/                    # Backend server code
-│   ├── server.js              # Main server file with API endpoints
-│   ├── database/              # Database modules
-│   │   ├── analytics.js       # Analytics data handling
-│   │   ├── messaging.js       # Message and campaign data
-│   │   ├── crm.js            # CRM data operations
-│   │   └── db.js             # Database initialization
-│   ├── utils/                 # Utility functions
-│   ├── sendDMs.js            # DM sending functionality
-│   ├── scheduler.js          # Message scheduling system
-│   └── accountsStore.js      # Account management
-├── public/                    # Static assets
-├── package.json              # Dependencies and scripts
-└── README.md                 # Project documentation
+├── electron/
+│   ├── main.cjs          # Electron main process - spawns backend, creates window
+│   └── preload.cjs       # Preload script with context bridge
+├── src/                  # React frontend
+│   ├── App.jsx           # Router and layout
+│   ├── Navbar.jsx        # Sidebar navigation
+│   ├── Home.jsx          # Dashboard
+│   ├── Messaging.jsx     # Send and schedule DMs
+│   ├── Targets.jsx       # Target list management
+│   ├── Leads.jsx         # Lead pipeline
+│   ├── Accounts.jsx      # Instagram account management
+│   ├── CRM.jsx           # Contact notes and interaction log
+│   ├── ReportingExport.jsx
+│   ├── TeamCollaboration.jsx
+│   ├── ScheduleDM.jsx
+│   ├── components/
+│   │   └── ProgressModal.jsx
+│   └── contexts/
+│       └── AppStateContext.jsx
+├── backend/
+│   ├── server.js         # Express app, all API routes
+│   ├── sendDMs.js        # DM sending logic via Puppeteer
+│   ├── scheduler.js      # node-cron job scheduler for DMs
+│   ├── messageMonitor.js # Polls for new DM replies
+│   ├── followerScraper.js
+│   ├── hashtagScraper.js
+│   ├── keywordScraper.js
+│   ├── puppeteerScraper.js
+│   ├── login.js          # Instagram login via Puppeteer
+│   ├── setup.js          # First-run database setup
+│   ├── backup-db.js
+│   ├── migrate-targets.js
+│   ├── config/
+│   │   └── index.js
+│   ├── database/
+│   │   ├── db.js         # SQLite initialization and table creation
+│   │   ├── accounts.js
+│   │   ├── leads.js
+│   │   ├── messaging.js
+│   │   ├── crm.js
+│   │   ├── targets.js
+│   │   ├── proxies.js
+│   │   ├── ratelimits.js
+│   │   ├── reports.js
+│   │   ├── scraping.js
+│   │   └── team.js
+│   ├── routes/
+│   │   └── team.js
+│   ├── services/
+│   │   └── accountService.js
+│   └── utils/
+│       ├── delay.js
+│       ├── logger.js
+│       ├── middleware.js
+│       ├── retry.js
+│       ├── selectors.js
+│       └── validator.js
+├── assets/
+│   └── icons/            # App icons and screenshots
+├── scripts/              # Build and packaging helpers
+├── public/
+├── index.html
+├── vite.config.js
+├── tailwind.config.js
+├── package.json          # Frontend + Electron deps and build scripts
+└── backend/package.json  # Backend deps
 ```
 
+## Getting Started
 
-## 🔒 Security Features
+### Prerequisites
 
-- **Rate Limiting**: Intelligent rate limiting to prevent account restrictions
-- **Proxy Support**: Rotate through multiple proxy servers
-- **Account Health Monitoring**: Real-time monitoring of account status
-- **Secure Authentication**: Encrypted credential storage
-- **Activity Logging**: Complete audit trail of all actions
-- **Permission System**: Granular role-based access control
+- Node.js 18+
+- npm
 
-## 📊 Performance & Scalability
+### Install Dependencies
 
-- **Multi-Account Support**: Manage unlimited Instagram accounts
-- **Concurrent Processing**: Parallel message sending and scraping
-- **Database Optimization**: Efficient data storage and retrieval
-- **Caching**: Smart caching for improved performance
-- **Real-time Updates**: Live updates using WebSocket connections
-- **Export Capabilities**: Bulk data export in multiple formats
+```bash
+# Install frontend + Electron dependencies
+npm install
 
-## 🛡️ Compliance & Best Practices
+# Install backend dependencies
+cd backend && npm install
+```
 
-- **Instagram Terms of Service**: Designed to comply with Instagram's guidelines
-- **Rate Limiting**: Automatic rate limiting to prevent violations
-- **User Privacy**: Respect user privacy and data protection
-- **Ethical Automation**: Focus on valuable, non-spammy interactions
-- **Account Safety**: Built-in safeguards to protect your accounts
+### Development
 
-## 🤝 Contributing
+Start the backend and frontend separately:
 
-We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
+```bash
+# Terminal 1 - backend
+cd backend && npm run dev
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
+# Terminal 2 - frontend (Vite dev server, proxies /api to localhost:5001)
+npm run dev
+```
 
-## 📄 License
+Or run in Electron with hot reload:
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+```bash
+npm run electron-dev
+```
 
-## 🆘 Support
+### Build
 
-- **Documentation**: Check our comprehensive documentation
-- **Issues**: Report bugs and request features on GitHub Issues
-- **Community**: Join our Discord community for support and discussions
-- **Email**: Contact us at support@instadmtool.com
+```bash
+# Build frontend assets
+npm run build
 
-## 🔄 Updates & Roadmap
+# Package as Electron app (current platform)
+npm run build-electron
 
-### Recent Updates
+# Package for all platforms
+npm run release:all
+```
 
-- ✅ Smart automation with trigger-based workflows
-- ✅ Account safety monitoring and proxy management
-- ✅ Advanced targeting with competitor analysis
-- ✅ Comprehensive reporting and export system
-- ✅ Team collaboration with role-based permissions
+Built distributables are output to `dist-electron/`.
 
-### Upcoming Features
+## Configuration
 
-- 🔄 AI-powered message optimization
-- 🔄 Advanced analytics with machine learning insights
-- 🔄 Mobile app for iOS and Android
-- 🔄 Integration with popular CRM systems
-- 🔄 Advanced A/B testing capabilities
-- 🔄 White-label solution for agencies
+The backend reads from a `.env` file in the `backend/` directory. Key variables:
+
+| Variable    | Default        | Description               |
+| ----------- | -------------- | ------------------------- |
+| `PORT`      | `5001`         | Backend API port          |
+| `DATA_DIR`  | `backend/data` | SQLite database directory |
+| `NODE_ENV`  | `development`  | Environment               |
+| `LOG_LEVEL` | `info`         | Winston log level         |
+
+## License
+
+Commercial - see [LICENSE.txt](LICENSE.txt) for details.
 
 ---
 
-**
+\*\*
