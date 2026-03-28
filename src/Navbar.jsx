@@ -6,14 +6,14 @@ import {
   MdAssessment,
   MdGroup,
 } from "react-icons/md";
-import {
-  FaCompass,
-} from "react-icons/fa6";
-import { FaUserFriends, FaBolt } from "react-icons/fa";
+import { FaCompass } from "react-icons/fa6";
+import { FaUserFriends, FaBolt, FaSignOutAlt } from "react-icons/fa";
 import { Link, useLocation } from "react-router-dom";
+import { useAuth } from "./contexts/AuthContext";
 
 const Navbar = () => {
   const location = useLocation();
+  const { logout, user } = useAuth();
   const navigationItems = [
     { path: "/", icon: MdDashboard, text: "Dashboard", size: 24 },
     { path: "/messaging", icon: MdSendToMobile, text: "Messaging", size: 24 },
@@ -70,6 +70,20 @@ const Navbar = () => {
             </Link>
           );
         })}
+      </div>
+
+      {/* Sign Out */}
+      <div className="mt-auto pt-2">
+        <button
+          onClick={logout}
+          title={user?.email ? `Sign out (${user.email})` : "Sign out"}
+          className="relative flex items-center justify-center w-12 h-12 cursor-pointer rounded-2xl transition-all duration-200 bg-gray-900 text-gray-400 hover:bg-red-500 hover:text-white hover:rounded-xl group"
+        >
+          <FaSignOutAlt size={18} />
+          <span className="absolute left-16 px-3 py-2 ml-2 text-sm font-medium text-white bg-gray-900 rounded-md opacity-0 pointer-events-none transition-opacity duration-200 z-50 group-hover:opacity-100 whitespace-nowrap">
+            Sign Out
+          </span>
+        </button>
       </div>
     </nav>
   );

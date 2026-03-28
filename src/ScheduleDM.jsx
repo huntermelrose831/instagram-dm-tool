@@ -39,6 +39,13 @@ const ScheduleDM = () => {
   useEffect(() => {
     fetchAccounts();
     fetchScheduledJobs();
+
+    // Poll every 10 seconds to keep job statuses (running → completed/failed) up to date
+    const jobPollInterval = setInterval(() => {
+      fetchScheduledJobs();
+    }, 10000);
+
+    return () => clearInterval(jobPollInterval);
   }, []);
 
   const fetchAccounts = async () => {
@@ -136,7 +143,7 @@ const ScheduleDM = () => {
         `${API_BASE_URL}/api/scheduled-jobs/${jobId}`,
         {
           method: "DELETE",
-        }
+        },
       );
 
       if (response.ok) {

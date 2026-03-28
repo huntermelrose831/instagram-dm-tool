@@ -126,12 +126,20 @@ const Messaging = () => {
     }
   }, [location.pathname]);
 
+  // Poll scheduled jobs every 10 seconds so completed/failed status stays current
+  useEffect(() => {
+    const jobPollInterval = setInterval(() => {
+      fetchScheduledJobs();
+    }, 10000);
+    return () => clearInterval(jobPollInterval);
+  }, []);
+
   useEffect(() => {
     if (!progressSession) return;
     const interval = setInterval(async () => {
       try {
         const res = await fetch(
-          `${API_BASE_URL}/api/dm-progress/${progressSession}`
+          `${API_BASE_URL}/api/dm-progress/${progressSession}`,
         );
         if (!res.ok) return;
         const data = await res.json();
@@ -143,6 +151,8 @@ const Messaging = () => {
           clearInterval(interval);
           setProgressComplete(true);
           setProgressError(last && last.stage === "error");
+          // Refresh scheduled jobs so completed status is reflected
+          fetchScheduledJobs();
           // Auto-close after 5 seconds if successful
           if (last && last.stage === "finish") {
             setTimeout(() => {
@@ -192,7 +202,7 @@ const Messaging = () => {
       newMessages[index] = value;
       setMessages(newMessages);
     },
-    [messages, setMessages]
+    [messages, setMessages],
   );
 
   const removeMessage = (index) => {
@@ -298,7 +308,7 @@ const Messaging = () => {
       }
       // selectedAccount is now the email
       const selectedAccObj = accounts.find(
-        (acc) => acc.email === selectedAccount
+        (acc) => acc.email === selectedAccount,
       );
       const selectedUsername = selectedAccObj ? selectedAccObj.username : "";
       const response = await fetch(`${API_BASE_URL}/api/schedule-dms`, {
@@ -325,7 +335,7 @@ const Messaging = () => {
         setTargets("");
         setMessages([""]);
         setScheduleTime(
-          formatLocalDateTime(new Date(Date.now() + 30 * 60 * 1000))
+          formatLocalDateTime(new Date(Date.now() + 30 * 60 * 1000)),
         );
         fetchScheduledJobs();
       } else {
@@ -343,7 +353,7 @@ const Messaging = () => {
         `${API_BASE_URL}/api/scheduled-jobs/${jobId}`,
         {
           method: "DELETE",
-        }
+        },
       );
 
       if (response.ok) {
@@ -360,7 +370,7 @@ const Messaging = () => {
         `${API_BASE_URL}/api/scheduled-jobs/${jobId}/delete`,
         {
           method: "DELETE",
-        }
+        },
       );
       if (response.ok) {
         fetchScheduledJobs();
@@ -571,7 +581,7 @@ const Messaging = () => {
                               </button>
                             )}
                           </div>
-                        )
+                        ),
                       )}
                     </div>
                     <p className="text-xs text-gray-500 mt-3 bg-blue-50 p-3 rounded-lg border border-blue-100">
@@ -606,7 +616,7 @@ const Messaging = () => {
                               <p className="text-indigo-600 font-medium">
                                 {" "}
                                 {new Date(
-                                  scheduleTime.replace("T", " ")
+                                  scheduleTime.replace("T", " "),
                                 ).toLocaleString()}
                               </p>
                             )}
@@ -751,7 +761,7 @@ const Messaging = () => {
                             </span>
                             <span
                               className={`ml-2 px-2 py-1 rounded-full text-xs border ${getJobStatusColor(
-                                job.status
+                                job.status,
                               )}`}
                             >
                               {job.status?.charAt(0).toUpperCase() +
@@ -805,7 +815,7 @@ const Messaging = () => {
                             {new Date(
                               (job.scheduled_for || job.schedule_time || "")
                                 .toString()
-                                .replace(" ", "T")
+                                .replace(" ", "T"),
                             ).toLocaleString()}
                           </p>
                           {job.is_recurring && (
@@ -856,7 +866,7 @@ const Messaging = () => {
                     <span className="font-bold text-green-600 text-lg">
                       {
                         scheduledJobs.filter(
-                          (job) => job.status === "completed"
+                          (job) => job.status === "completed",
                         ).length
                       }
                     </span>

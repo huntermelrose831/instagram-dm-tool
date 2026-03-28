@@ -24,6 +24,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Backend communication
   backendReady: () => ipcRenderer.invoke("backend-ready"),
 
+  // ── Auth / License ──────────────────────────────────────────────
+  auth: {
+    login: (email, password) =>
+      ipcRenderer.invoke("auth:login", email, password),
+    verify: () => ipcRenderer.invoke("auth:verify"),
+    logout: () => ipcRenderer.invoke("auth:logout"),
+    hasToken: () => ipcRenderer.invoke("auth:hasToken"),
+    openExternal: (url) => ipcRenderer.invoke("auth:openExternal", url),
+  },
+
   // Listen for events from main process
   on: (channel, callback) => {
     const validChannels = [

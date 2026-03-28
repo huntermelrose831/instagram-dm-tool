@@ -1,5 +1,5 @@
 # Copilot Guidance for `instagram-dm-tool`
-
+## remember this is a standalone software built with electron.
 ## Project Purpose
 This app is a specialized outreach tool for Instagram, inspired by colddms.com. It enables users to:
 - **Scrape usernames** from posts, hashtags, followers, comments, and more.
@@ -12,7 +12,7 @@ This app is a specialized outreach tool for Instagram, inspired by colddms.com. 
 - **Autopilot Messaging:** Automatically message prospects with personalized templates and manage replies in a CRM-like system.
 - **Follow-ups:** Automatically stop messaging once a recipient responds.
 - **Personalization:** Use variables (like `firstName`, `username`) in messages for higher engagement.
-- **Safe Automation:** Uses a Chrome extension for responsible Instagram emulation to avoid detection or bans.
+
 
 ## Design Philosophy
 - Prioritize user safety and Instagram compliance.

@@ -1,8 +1,9 @@
-const { app, BrowserWindow, ipcMain, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, shell } = require("electron");
 const path = require("path");
 const { spawn, execFile } = require("child_process");
 const fs = require("fs");
 const os = require("os");
+const authService = require("./authService.cjs");
 
 const isWindows = process.platform === "win32";
 
@@ -80,7 +81,7 @@ function createWindow() {
       if (app.isPackaged) {
         // When packaged, look for dist relative to the app resources
         indexPath = normalize(
-          path.join(process.resourcesPath, "dist", "index.html")
+          path.join(process.resourcesPath, "dist", "index.html"),
         );
       } else {
         // Development mode
@@ -123,7 +124,7 @@ function createWindow() {
         logError("Attempted path:", indexPath);
         dialog.showErrorBox(
           "Load Error",
-          `Could not load application UI.\n\nPath: ${indexPath}\nError: ${e.message}\n\nPlease check the installation.`
+          `Could not load application UI.\n\nPath: ${indexPath}\nError: ${e.message}\n\nPlease check the installation.`,
         );
       });
     }
@@ -145,9 +146,9 @@ function createWindow() {
         });
         dialog.showErrorBox(
           "Loading Failed",
-          `Failed to load the application.\n\nError: ${errorDescription}\nURL: ${validatedURL}`
+          `Failed to load the application.\n\nError: ${errorDescription}\nURL: ${validatedURL}`,
         );
-      }
+      },
     );
 
     mainWindow.webContents.on("did-finish-load", () => {
@@ -222,7 +223,7 @@ function startBackend() {
     "Platform:",
     process.platform,
     "Electron version:",
-    process.versions.electron
+    process.versions.electron,
   );
 
   // Ensure the app data directory exists
@@ -331,7 +332,7 @@ function startBackend() {
     logError("Backend failed to start.");
     dialog.showErrorBox(
       "Backend Error",
-      "The background service failed to start. Please reinstall or contact support."
+      "The background service failed to start. Please reinstall or contact support.",
     );
     return;
   }
@@ -341,13 +342,13 @@ function startBackend() {
       logError("Backend Spawn Error:", err.message);
     });
     backendProcess.stdout.on("data", (data) =>
-      log("Backend:", data.toString().trim())
+      log("Backend:", data.toString().trim()),
     );
     backendProcess.stderr.on("data", (data) =>
-      logError("Backend Error:", data.toString().trim())
+      logError("Backend Error:", data.toString().trim()),
     );
     backendProcess.on("close", (code) =>
-      log("Backend process exited", String(code))
+      log("Backend process exited", String(code)),
     );
   }
 }
@@ -385,13 +386,13 @@ app.on("activate", () => {
 ipcMain.handle("get-app-version", () => app.getVersion());
 ipcMain.handle("get-platform", () => process.platform);
 ipcMain.handle("show-open-dialog", async (event, options) =>
-  dialog.showOpenDialog(mainWindow, options)
+  dialog.showOpenDialog(mainWindow, options),
 );
 ipcMain.handle("show-save-dialog", async (event, options) =>
-  dialog.showSaveDialog(mainWindow, options)
+  dialog.showSaveDialog(mainWindow, options),
 );
 ipcMain.handle("show-message-box", async (event, options) =>
-  dialog.showMessageBox(mainWindow, options)
+  dialog.showMessageBox(mainWindow, options),
 );
 ipcMain.handle("restart-app", () => {
   stopBackend();
@@ -402,3 +403,46 @@ ipcMain.handle("check-for-updates", () => ({
   updateAvailable: false,
   version: app.getVersion(),
 }));
+
+// ── Auth IPC handlers ────────────────────────────────────────────────────
+ipcMain.handle("auth:login", async (_event, email, password) => {
+  try {
+    return await authService.login(email, password);
+  } catch (err) {
+    logError("auth:login error", err.message);
+    return { success: false, error: "An unexpected error occurred." };
+  }
+});
+
+ipcMain.handle("auth:verify", async () => {
+  try {
+    return await authService.verify();
+  } catch (err) {
+    logError("auth:verify error", err.message);
+    return { success: false, locked: true, error: "Verification failed." };
+  }
+});
+
+ipcMain.handle("auth:logout", async () => {
+  try {
+    return await authService.logout();
+  } catch (err) {
+    logError("auth:logout error", err.message);
+    return { success: true }; // always clear locally
+  }
+});
+
+ipcMain.handle("auth:hasToken", async () => {
+  try {
+    return await authService.hasStoredToken();
+  } catch {
+    return false;
+  }
+});
+
+ipcMain.handle("auth:openExternal", async (_event, url) => {
+  // Only allow turbodm.pro URLs
+  if (typeof url === "string" && url.startsWith("https://turbodm.pro")) {
+    shell.openExternal(url);
+  }
+});
