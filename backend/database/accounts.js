@@ -15,15 +15,15 @@ const init = async () => {
 const AccountsService = {
   // Add a new account
   async addAccount(accountData) {
-    try {
-      const account = {
-        ...accountData,
-        status: accountData.status || "active",
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
+    const account = {
+      ...accountData,
+      status: accountData.status || "active",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
 
-      const result = db.run(
+    return new Promise((resolve, reject) => {
+      db.run(
         `INSERT INTO ${TABLE_NAME} (username, password, status, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?)`,
         [
@@ -32,18 +32,26 @@ const AccountsService = {
           account.status,
           account.created_at,
           account.updated_at,
-        ]
+        ],
+        function (err) {
+          if (err) {
+            if (
+              err.message &&
+              err.message.includes("UNIQUE constraint failed")
+            ) {
+              return reject(
+                Object.assign(
+                  new Error("Account with this username already exists"),
+                  { code: "DUPLICATE" },
+                ),
+              );
+            }
+            return reject(err);
+          }
+          resolve({ id: this.lastID, ...account });
+        },
       );
-
-      return { id: result.lastInsertRowid, ...account };
-    } catch (error) {
-      if (error.message.includes("UNIQUE constraint failed")) {
-        // Duplicate key error
-        throw new Error("Account with this username already exists");
-      }
-      console.error("Error adding account:", error);
-      throw error;
-    }
+    });
   },
 
   // Get all accounts
@@ -95,7 +103,7 @@ const AccountsService = {
             } else {
               resolve(row);
             }
-          }
+          },
         );
       });
     } catch (error) {
@@ -117,7 +125,7 @@ const AccountsService = {
             } else {
               resolve(row);
             }
-          }
+          },
         );
       });
     } catch (error) {
@@ -153,9 +161,9 @@ const AccountsService = {
                   return;
                 }
                 resolve(row2);
-              }
+              },
             );
-          }
+          },
         );
       });
     } catch (error) {
@@ -174,7 +182,7 @@ const AccountsService = {
           updateData.status,
           new Date().toISOString(),
           username,
-        ]
+        ],
       );
       return result.changes > 0;
     } catch (error) {
@@ -188,7 +196,7 @@ const AccountsService = {
     try {
       const result = db.run(
         `UPDATE ${TABLE_NAME} SET cookies = ?, updated_at = ? WHERE username = ?`,
-        [cookies, new Date().toISOString(), username]
+        [cookies, new Date().toISOString(), username],
       );
       return result.changes > 0;
     } catch (error) {
@@ -202,7 +210,7 @@ const AccountsService = {
     try {
       const result = db.run(
         `UPDATE ${TABLE_NAME} SET status = ?, updated_at = ? WHERE username = ?`,
-        [status, new Date().toISOString(), username]
+        [status, new Date().toISOString(), username],
       );
       return result.changes > 0;
     } catch (error) {
@@ -216,7 +224,7 @@ const AccountsService = {
     try {
       const result = db.run(
         `UPDATE ${TABLE_NAME} SET last_login = ?, updated_at = ? WHERE username = ?`,
-        [new Date().toISOString(), new Date().toISOString(), username]
+        [new Date().toISOString(), new Date().toISOString(), username],
       );
       return result.changes > 0;
     } catch (error) {
@@ -262,7 +270,7 @@ const AccountsService = {
             } else {
               resolve(rows || []);
             }
-          }
+          },
         );
       });
     } catch (error) {
@@ -284,7 +292,7 @@ const AccountsService = {
             } else {
               resolve(rows || []);
             }
-          }
+          },
         );
       });
     } catch (error) {
@@ -298,7 +306,7 @@ const AccountsService = {
     try {
       // Check if account exists
       const existingAccount = await this.getAccountByUsername(
-        accountData.username
+        accountData.username,
       );
 
       if (existingAccount) {
@@ -333,7 +341,7 @@ const AccountsService = {
 
         const result = db.run(
           `UPDATE ${TABLE_NAME} SET ${updateFields.join(", ")} WHERE username = ?`,
-          updateValues
+          updateValues,
         );
 
         return { id: existingAccount.id, ...accountData };
@@ -358,7 +366,7 @@ const AccountsService = {
             account.lastLogin,
             account.created_at,
             account.updated_at,
-          ]
+          ],
         );
 
         return { id: result.lastInsertRowid, ...account };

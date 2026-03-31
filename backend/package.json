@@ -8,6 +8,7 @@
     "dev": "nodemon server.js",
     "lint": "eslint . --fix",
     "test": "jest",
+    "test:api": "node test-endpoints.js",
     "backup": "node backup-db.js",
     "setup": "node setup.js",
     "validate-schema": "node validate-schema.js"
@@ -16,7 +17,6 @@
     "@chakra-ui/react": "^3.19.1",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.0",
-    "apify-client": "^2.12.5",
     "cors": "^2.8.5",
     "dotenv": "^16.5.0",
     "envalid": "^8.1.0",

@@ -11,6 +11,7 @@ const {
 } = require("./utils/selectors");
 const { createContact, recordInteraction } = require("./database/crm");
 const config = require("./config");
+const { tr } = require("framer-motion/client");
 
 // Mock DM sender for when Puppeteer fails
 const sendDMsMock = async ({
@@ -47,7 +48,7 @@ const sendDMsMock = async ({
   };
 
   console.log(
-    `🎭 Mock DM session complete: ${targetsArray.length} targets processed`
+    `🎭 Mock DM session complete: ${targetsArray.length} targets processed`,
   );
   console.log("📝 Note: This was a simulation. No actual DMs were sent.");
 
@@ -113,14 +114,14 @@ const ensureComposeScreen = async (page) => {
         const newMessageButton = await findWorkingSelector(
           page,
           SELECTORS.NEWMESSAGEBUTTON,
-          10000
+          10000,
         );
         await newMessageButton.click();
         console.log("🆕 Clicked New Message button");
         await delay(3000);
       } catch (error) {
         console.log(
-          "ℹ️ New Message button not found quickly; trying navigation approach."
+          "ℹ️ New Message button not found quickly; trying navigation approach.",
         );
 
         // Fallback: navigate directly
@@ -146,42 +147,31 @@ const searchAndSelectUser = async (page, username) => {
   }
 
   try {
-    // Locate search box with fallback attempts
-    let searchBox;
-    try {
-      searchBox = await findWorkingSelector(page, SELECTORS.SEARCH_BOX, 4000);
-    } catch (e) {
-      console.log(
-        "Primary search box selectors failed; attempting fallback selector strategies."
-      );
-      const fallbackSelectors = [
-        'input[placeholder="Search..."]',
-        'input[aria-label*="Search"]',
-        'input[placeholder*="Search"]',
-        'input[dir="auto"][type="text"]',
-      ];
-      try {
-        searchBox = await waitForAnySelector(page, fallbackSelectors, 4000);
-      } catch (e2) {
-        throw new Error("Search box not found for composing new DM");
+    // Search box is auto-focused after clicking New Message.
+    // Wait for the dialog to fully settle before typing.
+    await delay(1200 + Math.random() * 800);
+
+    // Human-like character-by-character typing with variable pauses
+    for (let i = 0; i < username.length; i++) {
+      await page.keyboard.type(username[i]);
+      // Base delay 80-180ms per character
+      let charDelay = 80 + Math.random() * 100;
+      // Occasional hesitation every 3-5 chars
+      if (i > 0 && i % (3 + Math.floor(Math.random() * 3)) === 0) {
+        charDelay += 200 + Math.random() * 300;
       }
+      await delay(charDelay);
     }
 
-    // Clear and type username
-    await searchBox.click({ clickCount: 3 }).catch(() => searchBox.click());
-    await page.keyboard.press("Backspace").catch(() => {});
-    await delay(400 + Math.random() * 400);
-    await searchBox.type(username, {
-      delay: getRandomDelay(DELAYS.TYPING.min, DELAYS.TYPING.max),
-    });
-    await delay(1200 + Math.random() * 600);
+    // Wait for Instagram to process the search query
+    await delay(1800 + Math.random() * 800);
 
     // Wait for search results and select user
     console.log("Waiting for search results...");
     const results = await waitForAnySelector(
       page,
       SELECTORS.SEARCH_RESULTS,
-      5000
+      5000,
     ).catch(() => null);
 
     if (results) {
@@ -199,12 +189,15 @@ const searchAndSelectUser = async (page, username) => {
         const userFound = await page.evaluate((targetUsername) => {
           // Find all elements that might contain the username
           const elements = Array.from(
-            document.querySelectorAll("div, span, a")
+            document.querySelectorAll("div, span, a"),
           );
           for (const element of elements) {
             if (
               element.textContent &&
-              element.textContent.trim() === targetUsername
+              element.textContent
+                .toLowerCase()
+                .includes(targetUsername.toLowerCase()) &&
+              element.children.length === 0 // leaf node - most likely a text label
             ) {
               // Look for a clickable parent (button, div with role=button, etc.)
               let clickableParent = element;
@@ -212,6 +205,7 @@ const searchAndSelectUser = async (page, username) => {
                 if (
                   clickableParent.tagName === "BUTTON" ||
                   clickableParent.getAttribute("role") === "button" ||
+                  clickableParent.getAttribute("role") === "option" ||
                   clickableParent.onclick ||
                   clickableParent.style.cursor === "pointer"
                 ) {
@@ -257,15 +251,19 @@ const searchAndSelectUser = async (page, username) => {
 
       let chatButtonFound = false;
 
-      // Try to find Chat button using text content
+      // Try to find Chat / Send message button using text content
       for (const selector of chatButtonSelectors) {
         try {
-          const buttons = await page.$(selector);
+          const buttons = await page.$$(selector);
 
           for (const btn of buttons) {
             try {
               const text = await btn.evaluate((el) => el?.textContent?.trim());
-              if (text === "Chat") {
+              if (
+                text === "Chat" ||
+                text === "Send message" ||
+                text === "Next"
+              ) {
                 await btn.click();
                 chatButtonFound = true;
                 await delay(1500);
@@ -290,12 +288,13 @@ const searchAndSelectUser = async (page, username) => {
             document.body,
             NodeFilter.SHOW_TEXT,
             null,
-            false
+            false,
           );
 
           let node;
           while ((node = walker.nextNode())) {
-            if (node.textContent.trim() === "Chat") {
+            const txt = node.textContent.trim();
+            if (txt === "Chat" || txt === "Send message" || txt === "Next") {
               let element = node.parentElement;
               // Walk up the DOM to find a clickable element
               while (element && element !== document.body) {
@@ -330,7 +329,7 @@ const searchAndSelectUser = async (page, username) => {
   } catch (error) {
     console.error(
       `Error searching and selecting user ${username}:`,
-      error.message
+      error.message,
     );
     throw error;
   }
@@ -397,7 +396,7 @@ async function sendDMs({
   let selectedVariationIndex = -1;
   if (messageVariations && messageVariations.length > 0) {
     selectedVariationIndex = Math.floor(
-      Math.random() * messageVariations.length
+      Math.random() * messageVariations.length,
     );
     message = messageVariations[selectedVariationIndex];
   }
@@ -447,7 +446,7 @@ async function sendDMs({
           acc.username === accountIdentifier ||
           acc.email === accountIdentifier ||
           acc.username.includes(accountIdentifier) ||
-          (acc.email && acc.email.includes(accountIdentifier))
+          (acc.email && acc.email.includes(accountIdentifier)),
       );
     }
 
@@ -472,7 +471,7 @@ async function sendDMs({
     account.cookies.length === 0
   ) {
     console.warn(
-      `No account found or no cookies available for: ${accountIdentifier}`
+      `No account found or no cookies available for: ${accountIdentifier}`,
     );
     // Get available accounts for debugging
     try {
@@ -483,7 +482,7 @@ async function sendDMs({
           username: acc.username,
           email: acc.email,
           hasCookies: acc.cookies && acc.cookies.length > 0,
-        }))
+        })),
       );
     } catch (error) {
       console.log("Error getting accounts for debugging:", error.message);
@@ -500,13 +499,13 @@ async function sendDMs({
   }
 
   console.log(
-    `✅ Found account: ${account.username} with ${account.cookies.length} cookies`
+    `✅ Found account: ${account.username} with ${account.cookies.length} cookies`,
   );
 
   let browser;
   try {
     console.log(
-      "Attempting to launch Puppeteer with working config (--no-sandbox)..."
+      "Attempting to launch Puppeteer with working config (--no-sandbox)...",
     );
     report("launch_browser", "Connecting to Instagram...", 10);
     browser = await puppeteer.launch({
@@ -519,7 +518,7 @@ async function sendDMs({
   } catch (error) {
     console.log(
       "Working config failed, trying fallback with more args:",
-      error.message
+      error.message,
     );
     try {
       console.log("Attempting fallback Puppeteer config...");
@@ -534,7 +533,7 @@ async function sendDMs({
     } catch (fallbackError) {
       console.log(
         "Fallback Puppeteer config failed, trying extended config:",
-        fallbackError.message
+        fallbackError.message,
       );
       try {
         console.log("Attempting extended Puppeteer config...");
@@ -555,10 +554,10 @@ async function sendDMs({
       } catch (extendedError) {
         console.error(
           "All Puppeteer configurations failed:",
-          extendedError.message
+          extendedError.message,
         );
         console.log(
-          "🎭 FALLBACK: Using mock DM sender due to Puppeteer failure"
+          "🎭 FALLBACK: Using mock DM sender due to Puppeteer failure",
         );
 
         return await sendDMsMock({
@@ -578,7 +577,7 @@ async function sendDMs({
 
     // Set user agent to avoid detection
     await page.setUserAgent(
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     );
 
     // Navigate to Instagram home page first
@@ -594,7 +593,7 @@ async function sendDMs({
         homeLoaded = true;
       } catch (err) {
         console.warn(
-          `Attempt ${attempt} to load Instagram home failed: ${err.message}`
+          `Attempt ${attempt} to load Instagram home failed: ${err.message}`,
         );
         if (attempt === 2) throw err;
         await delay(2000);
@@ -631,7 +630,7 @@ async function sendDMs({
 
     if (cookiesSet === 0) {
       throw new Error(
-        "No cookies could be applied. Account may need to be re-added."
+        "No cookies could be applied. Account may need to be re-added.",
       );
     }
 
@@ -647,7 +646,7 @@ async function sendDMs({
         authLoaded = true;
       } catch (err) {
         console.warn(
-          `Attempt ${attempt} to reload Instagram with authentication failed: ${err.message}`
+          `Attempt ${attempt} to reload Instagram with authentication failed: ${err.message}`,
         );
         if (attempt === 2) throw err;
         await delay(2000);
@@ -674,7 +673,7 @@ async function sendDMs({
       ];
 
       const loginForm = loginSelectors.some(
-        (selector) => document.querySelector(selector) !== null
+        (selector) => document.querySelector(selector) !== null,
       );
 
       // Look for logged-in elements (indicates logged in)
@@ -711,7 +710,7 @@ async function sendDMs({
 
       Object.entries(loggedInSelectors).forEach(([key, selectors]) => {
         const found = selectors.some(
-          (selector) => document.querySelector(selector) !== null
+          (selector) => document.querySelector(selector) !== null,
         );
         loggedInElements[key] = found;
         if (found) loggedInCount++;
@@ -746,10 +745,10 @@ async function sendDMs({
       // Authentication successful - reduced logging
     } else if (authCheck.hasLoginForm || authCheck.isOnLoginPage) {
       console.error(
-        "❌ Still seeing login form - cookies may be expired or invalid"
+        "❌ Still seeing login form - cookies may be expired or invalid",
       );
       throw new Error(
-        "Authentication failed - login form still visible. Please re-add your Instagram account."
+        "Authentication failed - login form still visible. Please re-add your Instagram account.",
       );
     } else {
       console.warn("⚠️ Authentication unclear - will attempt to continue");
@@ -793,7 +792,7 @@ async function sendDMs({
       report(
         "target_start",
         `Sending to ${target}...`,
-        Math.min(95, targetStartPercent)
+        Math.min(95, targetStartPercent),
       );
 
       let retryCount = 0;
@@ -805,13 +804,13 @@ async function sendDMs({
         contact = await createContact(target);
         if (!contact || !contact.id) {
           console.warn(
-            `⚠️ Failed to create/get contact for ${target} - contact.id is missing`
+            `⚠️ Failed to create/get contact for ${target} - contact.id is missing`,
           );
         }
       } catch (contactError) {
         console.warn(
           `⚠️ Error creating contact for ${target}:`,
-          contactError.message
+          contactError.message,
         );
         contact = null;
       }
@@ -822,7 +821,7 @@ async function sendDMs({
           const notNowBtn = await waitForAnySelector(
             page,
             SELECTORS.NOT_NOW_BUTTON,
-            5000
+            5000,
           ).catch(() => null);
           if (notNowBtn) await notNowBtn.click();
 
@@ -835,7 +834,7 @@ async function sendDMs({
             const newMessageButton = await findWorkingSelector(
               page,
               SELECTORS.NEWMESSAGEBUTTON,
-              3000
+              3000,
             );
             if (newMessageButton) {
               await newMessageButton.click();
@@ -845,7 +844,7 @@ async function sendDMs({
             }
           } catch (_) {
             console.log(
-              "ℹ️ New Message button not found quickly; proceeding with existing compose view."
+              "ℹ️ New Message button not found quickly; proceeding with existing compose view.",
             );
           }
 
@@ -854,7 +853,7 @@ async function sendDMs({
 
           const messageBox = await waitForAnySelector(
             page,
-            SELECTORS.MESSAGE_BOX
+            SELECTORS.MESSAGE_BOX,
           );
           // Human-like typing (character delays already applied). Add pre-send pause.
           await messageBox.type(message, {
@@ -869,13 +868,13 @@ async function sendDMs({
 
           const afterSendPercent = Math.min(
             95,
-            targetStartPercent + basePerTarget * 0.7
+            targetStartPercent + basePerTarget * 0.7,
           );
           report(
             "message_sent",
             `✓ Message sent to ${target}`,
             afterSendPercent,
-            { target }
+            { target },
           );
           // Record message sent in CRM
           try {
@@ -883,13 +882,13 @@ async function sendDMs({
               recordInteraction(contact.id, "dm_sent", message, campaignId);
             } else {
               console.warn(
-                `⚠️ Cannot record interaction: contact.id is null for ${target}`
+                `⚠️ Cannot record interaction: contact.id is null for ${target}`,
               );
             }
           } catch (crmError) {
             console.warn(
               `⚠️ Failed to record CRM interaction for ${target}:`,
-              crmError.message
+              crmError.message,
             );
           }
 
@@ -901,7 +900,7 @@ async function sendDMs({
             } catch (navErr) {
               console.warn(
                 "⚠️ Compose navigation issue, will attempt reuse:",
-                navErr.message
+                navErr.message,
               );
             }
           }
@@ -921,17 +920,17 @@ async function sendDMs({
                 recordInteraction(
                   contact.id,
                   "dm_received",
-                  "Received response"
+                  "Received response",
                 );
               } else {
                 console.warn(
-                  `⚠️ Cannot record response interaction: contact.id is null for ${target}`
+                  `⚠️ Cannot record response interaction: contact.id is null for ${target}`,
                 );
               }
             } catch (crmError) {
               console.warn(
                 `⚠️ Failed to record CRM response interaction for ${target}:`,
-                crmError.message
+                crmError.message,
               );
             }
           }
@@ -941,7 +940,7 @@ async function sendDMs({
             "target_complete",
             `✓ Completed ${target}`,
             Math.min(95, targetStartPercent + basePerTarget),
-            { target }
+            { target },
           );
           success = true;
         } catch (error) {
@@ -950,7 +949,7 @@ async function sendDMs({
             "target_error",
             `⚠ Error with ${target}`,
             targetStartPercent,
-            { target, error: error.message }
+            { target, error: error.message },
           );
           errors.push({ target, error: error.message });
 
@@ -960,7 +959,7 @@ async function sendDMs({
             console.log(`Screenshot saved: ${screenshotPath}`);
           } catch (screenshotError) {
             console.warn(
-              `Could not save screenshot: ${screenshotError.message}`
+              `Could not save screenshot: ${screenshotError.message}`,
             );
           }
 
@@ -969,12 +968,12 @@ async function sendDMs({
             rateLimitHits++;
             consecutiveErrors++;
             console.log(
-              `⚠️ Potential rate limit detected (hit ${rateLimitHits}/${MAX_RATE_LIMIT_RETRIES}, consecutive errors: ${consecutiveErrors}): ${error.message}`
+              `⚠️ Potential rate limit detected (hit ${rateLimitHits}/${MAX_RATE_LIMIT_RETRIES}, consecutive errors: ${consecutiveErrors}): ${error.message}`,
             );
 
             // Refresh the page to reset the Instagram interface
             console.log(
-              "🔄 Refreshing Instagram DM page to reset interface..."
+              "🔄 Refreshing Instagram DM page to reset interface...",
             );
             await page.goto("https://www.instagram.com/direct/inbox/", {
               waitUntil: "networkidle2",
@@ -985,7 +984,7 @@ async function sendDMs({
             // Exponential backoff based on consecutive errors and rate limit hits
             const backoffMultiplier = Math.pow(
               2,
-              Math.min(consecutiveErrors - 1, 4)
+              Math.min(consecutiveErrors - 1, 4),
             ); // Cap at 16x
             const baseDelay =
               rateLimitHits >= MAX_RATE_LIMIT_RETRIES
@@ -994,22 +993,22 @@ async function sendDMs({
             const backoffDelay = baseDelay * backoffMultiplier;
 
             console.log(
-              `⏳ Exponential backoff: ${backoffDelay / 1000}s (base: ${baseDelay / 1000}s × ${backoffMultiplier})`
+              `⏳ Exponential backoff: ${backoffDelay / 1000}s (base: ${baseDelay / 1000}s × ${backoffMultiplier})`,
             );
             await delay(backoffDelay);
 
             // If we hit too many consecutive errors, stop the entire process
             if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
               console.log(
-                `🛑 Stopping due to ${consecutiveErrors} consecutive errors. Instagram may be heavily rate limiting.`
+                `🛑 Stopping due to ${consecutiveErrors} consecutive errors. Instagram may be heavily rate limiting.`,
               );
               report(
                 "error",
                 `Stopped due to excessive rate limiting after ${consecutiveErrors} consecutive errors`,
-                100
+                100,
               );
               throw new Error(
-                `Too many consecutive rate limit errors (${consecutiveErrors}). Stopping to prevent account restrictions.`
+                `Too many consecutive rate limit errors (${consecutiveErrors}). Stopping to prevent account restrictions.`,
               );
             }
 
@@ -1025,7 +1024,7 @@ async function sendDMs({
 
       const pause = getRandomDelay(
         DELAYS.BETWEEN_MESSAGES.min,
-        DELAYS.BETWEEN_MESSAGES.max
+        DELAYS.BETWEEN_MESSAGES.max,
       );
       console.log(`Waiting ${Math.round(pause / 1000)}s before next DM...`);
       await delay(pause);
@@ -1036,10 +1035,10 @@ async function sendDMs({
       100,
       {
         messagesSent,
-      }
+      },
     );
     console.log(
-      `Session complete: ${messagesSent} DMs sent out of ${targetsArray.length} targets.`
+      `Session complete: ${messagesSent} DMs sent out of ${targetsArray.length} targets.`,
     );
 
     if (errors.length > 0) {
@@ -1051,7 +1050,7 @@ async function sendDMs({
       try {
         await updateCampaignStats(campaignId, { success_count: messagesSent });
         console.log(
-          `Updated campaign ${campaignId} stats: ${messagesSent} messages sent`
+          `Updated campaign ${campaignId} stats: ${messagesSent} messages sent`,
         );
       } catch (statsError) {
         console.error("Failed to update campaign stats:", statsError);
@@ -1081,7 +1080,7 @@ async function sendDMs({
     // If we sent some messages before the critical error, still return partial results
     if (messagesSent > 0) {
       console.log(
-        `Partial success: ${messagesSent} messages were sent before critical error`
+        `Partial success: ${messagesSent} messages were sent before critical error`,
       );
       return {
         successCount: messagesSent,

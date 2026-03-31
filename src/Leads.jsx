@@ -132,7 +132,6 @@ const Leads = () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-api-key": import.meta.env.VITE_API_KEY,
         },
         body: JSON.stringify({ username: username.trim() }),
       });
@@ -206,6 +205,9 @@ const Leads = () => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/targets/clear`, {
         method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+        },
       });
 
       const data = await response.json();
@@ -227,7 +229,7 @@ const Leads = () => {
 
       // Call the backend API to get the real targets data
       const response = await fetch(
-        `/api/targeting/leads/export?format=${format}`
+        `/api/targeting/leads/export?format=${format}`,
       );
 
       if (!response.ok) {
@@ -322,7 +324,7 @@ const Leads = () => {
         // For posts scraping, we need both the post URL and an Instagram account to use
         if (!selectedAccount) {
           throw new Error(
-            "Please select an Instagram account to use for scraping"
+            "Please select an Instagram account to use for scraping",
           );
         }
         requestBody = {
@@ -333,7 +335,7 @@ const Leads = () => {
         // For accounts scraping, we need both the profile URL and an Instagram account to use
         if (!selectedAccount) {
           throw new Error(
-            "Please select an Instagram account to use for scraping"
+            "Please select an Instagram account to use for scraping",
           );
         }
         requestBody = {
@@ -363,7 +365,6 @@ const Leads = () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-api-key": import.meta.env.VITE_API_KEY,
         },
         body: JSON.stringify(requestBody),
       });
@@ -387,7 +388,7 @@ const Leads = () => {
     const unadded = leads.filter((lead) =>
       typeof lead === "string"
         ? !addedLeads.has(lead)
-        : !addedLeads.has(lead.username)
+        : !addedLeads.has(lead.username),
     );
     unadded.forEach((lead) => {
       const username = typeof lead === "string" ? lead : lead.username;
@@ -403,7 +404,6 @@ const Leads = () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-api-key": import.meta.env.VITE_API_KEY,
         },
         body: JSON.stringify({
           leads: [
@@ -471,11 +471,10 @@ const Leads = () => {
         addedToTargets: true,
       }));
 
-      const response = await fetch("http://localhost:5000/api/leads/batch", {
+      const response = await fetch(`${API_BASE_URL}/api/leads/batch`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-api-key": import.meta.env.VITE_API_KEY,
         },
         body: JSON.stringify({ leads: leadsToSave }),
       });
@@ -672,7 +671,7 @@ const Leads = () => {
                           value={filterMaxPosts}
                           onChange={(e) =>
                             setFilterMaxPosts(
-                              Math.min(10, Math.max(1, Number(e.target.value)))
+                              Math.min(10, Math.max(1, Number(e.target.value))),
                             )
                           }
                           className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-200 text-black"
@@ -1136,7 +1135,7 @@ const Leads = () => {
                   {targets.filter((target) =>
                     target
                       .toLowerCase()
-                      .includes(targetSearchTerm.toLowerCase())
+                      .includes(targetSearchTerm.toLowerCase()),
                   ).length === 0 ? (
                     <div className="text-center py-12 text-gray-500">
                       <FaUsers className="mx-auto text-4xl mb-4" />
@@ -1151,7 +1150,7 @@ const Leads = () => {
                         .filter((target) =>
                           target
                             .toLowerCase()
-                            .includes(targetSearchTerm.toLowerCase())
+                            .includes(targetSearchTerm.toLowerCase()),
                         )
                         .map((target, index) => (
                           <div

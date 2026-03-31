@@ -24,10 +24,6 @@ const ReportingExport = () => {
     try {
       const res = await fetch(`${API_BASE_URL}/api/reports/${reportId}`, {
         method: "DELETE",
-        headers: {
-          "X-API-KEY":
-            "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
-        },
       });
       if (res.ok) {
         fetchReports();
@@ -52,11 +48,9 @@ const ReportingExport = () => {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "X-API-KEY":
-              "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
           },
           body: JSON.stringify({ format }),
-        }
+        },
       );
       if (res.ok) {
         const blob = await res.blob();
@@ -122,8 +116,6 @@ const ReportingExport = () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-API-KEY":
-            "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
         },
         body: JSON.stringify(reportConfig),
       });
@@ -160,12 +152,7 @@ const ReportingExport = () => {
 
   const fetchReports = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/reports`, {
-        headers: {
-          "X-API-KEY":
-            "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
-        },
-      });
+      const res = await fetch(`${API_BASE_URL}/api/reports`);
       const data = await res.json();
       setReports(data.reports || []);
     } catch (e) {
@@ -176,12 +163,7 @@ const ReportingExport = () => {
 
   const fetchScheduled = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/reports/scheduled`, {
-        headers: {
-          "X-API-KEY":
-            "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
-        },
-      });
+      const res = await fetch(`${API_BASE_URL}/api/reports/scheduled`);
       const data = await res.json();
       setScheduledReports(data.scheduledReports || []);
     } catch (e) {
@@ -192,12 +174,7 @@ const ReportingExport = () => {
 
   const fetchExportJobs = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/exports/jobs`, {
-        headers: {
-          "X-API-KEY":
-            "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
-        },
-      });
+      const res = await fetch(`${API_BASE_URL}/api/exports/jobs`);
       const data = await res.json();
       setExportJobs(data.jobs || []);
     } catch (e) {
@@ -215,8 +192,6 @@ const ReportingExport = () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-API-KEY":
-            "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
         },
         body: JSON.stringify({ type, format: "csv" }),
       });
@@ -233,10 +208,6 @@ const ReportingExport = () => {
       setLoading(true);
       const res = await fetch(`${API_BASE_URL}/api/reports/${reportId}/run`, {
         method: "POST",
-        headers: {
-          "X-API-KEY":
-            "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
-        },
       });
       const data = await res.json();
       // Optionally refresh reports after running
@@ -253,12 +224,6 @@ const ReportingExport = () => {
     try {
       const res = await fetch(
         `${API_BASE_URL}/api/exports/jobs/${job.id}/download`,
-        {
-          headers: {
-            "X-API-KEY":
-              "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
-          },
-        }
       );
       if (res.ok) {
         const blob = await res.blob();
@@ -791,7 +756,7 @@ const ReportingExport = () => {
                                         "Thu",
                                         "Fri",
                                         "Sat",
-                                      ][day]
+                                      ][day],
                                   )
                                   .join(", ")}
                               </span>
@@ -1277,13 +1242,13 @@ const ReportingExport = () => {
                                   type="checkbox"
                                   className="mr-1 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                                   checked={reportConfig.schedule.days.includes(
-                                    index
+                                    index,
                                   )}
                                   onChange={(e) => {
                                     const days = e.target.checked
                                       ? [...reportConfig.schedule.days, index]
                                       : reportConfig.schedule.days.filter(
-                                          (d) => d !== index
+                                          (d) => d !== index,
                                         );
                                     setReportConfig({
                                       ...reportConfig,

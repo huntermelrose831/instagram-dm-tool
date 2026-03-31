@@ -28,7 +28,7 @@ const init = async () => {
           } else {
             resolve();
           }
-        }
+        },
       );
     });
 
@@ -61,124 +61,103 @@ const init = async () => {
 const ReportsService = {
   // Create a new report
   async createReport(reportData) {
-    try {
-      const report = {
-        type: reportData.type,
-        account_username: reportData.account_username,
-        data: JSON.stringify(reportData.data || {}),
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-
-      const result = db.run(
-        `
-        INSERT INTO ${TABLE_NAME} (type, account_username, data, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?)
-      `,
+    const now = new Date().toISOString();
+    return new Promise((resolve, reject) => {
+      db.run(
+        `INSERT INTO ${TABLE_NAME} (type, account_username, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
         [
-          report.type,
-          report.account_username,
-          report.data,
-          report.created_at,
-          report.updated_at,
-        ]
+          reportData.type,
+          reportData.account_username || null,
+          JSON.stringify(reportData.data || {}),
+          now,
+          now,
+        ],
+        function (err) {
+          if (err) return reject(err);
+          resolve({
+            id: this.lastID,
+            type: reportData.type,
+            account_username: reportData.account_username,
+            data: reportData.data || {},
+            created_at: now,
+            updated_at: now,
+          });
+        },
       );
-
-      return { id: result.lastInsertRowid, ...report };
-    } catch (error) {
-      console.error("Error creating report:", error);
-      throw error;
-    }
+    });
   },
 
   // Get all reports
   async getAllReports() {
-    try {
-      const reports = db.all(`
-        SELECT * FROM ${TABLE_NAME}
-        ORDER BY created_at DESC
-      `);
-
-      return reports.map((report) => ({
-        ...report,
-        id: report.id,
-        data: JSON.parse(report.data || "{}"),
-      }));
-    } catch (error) {
-      console.error("Error getting all reports:", error);
-      throw error;
-    }
+    return new Promise((resolve, reject) => {
+      db.all(
+        `SELECT * FROM ${TABLE_NAME} ORDER BY created_at DESC`,
+        [],
+        (err, rows) => {
+          if (err) return reject(err);
+          resolve(
+            (rows || []).map((r) => ({
+              ...r,
+              data: JSON.parse(r.data || "{}"),
+            })),
+          );
+        },
+      );
+    });
   },
 
   // Get report by ID
   async getReportById(id) {
-    try {
-      const report = db.get(`SELECT * FROM ${TABLE_NAME} WHERE id = ?`, [id]);
-
-      if (report) {
-        return {
-          ...report,
-          id: report.id,
-          data: JSON.parse(report.data || "{}"),
-        };
-      }
-
-      return null;
-    } catch (error) {
-      console.error("Error getting report by ID:", error);
-      throw error;
-    }
+    return new Promise((resolve, reject) => {
+      db.get(`SELECT * FROM ${TABLE_NAME} WHERE id = ?`, [id], (err, row) => {
+        if (err) return reject(err);
+        if (!row) return resolve(null);
+        resolve({ ...row, data: JSON.parse(row.data || "{}") });
+      });
+    });
   },
 
   // Get reports by type
   async getReportsByType(type) {
-    try {
-      const reports = db.all(
-        `
-        SELECT * FROM ${TABLE_NAME}
-        WHERE type = ?
-        ORDER BY created_at DESC
-      `,
-        [type]
+    return new Promise((resolve, reject) => {
+      db.all(
+        `SELECT * FROM ${TABLE_NAME} WHERE type = ? ORDER BY created_at DESC`,
+        [type],
+        (err, rows) => {
+          if (err) return reject(err);
+          resolve(
+            (rows || []).map((r) => ({
+              ...r,
+              data: JSON.parse(r.data || "{}"),
+            })),
+          );
+        },
       );
-
-      return reports.map((report) => ({
-        ...report,
-        id: report.id,
-        data: JSON.parse(report.data || "{}"),
-      }));
-    } catch (error) {
-      console.error("Error getting reports by type:", error);
-      throw error;
-    }
+    });
   },
 
   // Get reports by account
   async getReportsByAccount(accountUsername) {
-    try {
-      const reports = db.all(
-        `
-        SELECT * FROM ${TABLE_NAME}
-        WHERE account_username = ?
-        ORDER BY created_at DESC
-      `,
-        [accountUsername]
+    return new Promise((resolve, reject) => {
+      db.all(
+        `SELECT * FROM ${TABLE_NAME} WHERE account_username = ? ORDER BY created_at DESC`,
+        [accountUsername],
+        (err, rows) => {
+          if (err) return reject(err);
+          resolve(
+            (rows || []).map((r) => ({
+              ...r,
+              data: JSON.parse(r.data || "{}"),
+            })),
+          );
+        },
       );
-
-      return reports.map((report) => ({
-        ...report,
-        id: report.id,
-        data: JSON.parse(report.data || "{}"),
-      }));
-    } catch (error) {
-      console.error("Error getting reports by account:", error);
-      throw error;
-    }
+    });
   },
 
   // Update report
   async updateReport(id, updateData) {
-    try {
+    return new Promise((resolve, reject) => {
       const updateFields = ["updated_at = ?"];
       const values = [new Date().toISOString()];
 
@@ -186,90 +165,75 @@ const ReportsService = {
         updateFields.push("type = ?");
         values.push(updateData.type);
       }
-
       if (updateData.account_username !== undefined) {
         updateFields.push("account_username = ?");
         values.push(updateData.account_username);
       }
-
       if (updateData.data !== undefined) {
         updateFields.push("data = ?");
         values.push(JSON.stringify(updateData.data));
       }
 
       values.push(id);
-
       db.run(
-        `
-        UPDATE ${TABLE_NAME}
-        SET ${updateFields.join(", ")}
-        WHERE id = ?
-      `,
-        values
+        `UPDATE ${TABLE_NAME} SET ${updateFields.join(", ")} WHERE id = ?`,
+        values,
+        (err) => {
+          if (err) return reject(err);
+          resolve(true);
+        },
       );
-
-      return true;
-    } catch (error) {
-      console.error("Error updating report:", error);
-      throw error;
-    }
+    });
   },
 
   // Delete report
   async deleteReport(id) {
-    try {
-      db.run(`DELETE FROM ${TABLE_NAME} WHERE id = ?`, [id]);
-      return true;
-    } catch (error) {
-      console.error("Error deleting report:", error);
-      throw error;
-    }
+    return new Promise((resolve, reject) => {
+      db.run(`DELETE FROM ${TABLE_NAME} WHERE id = ?`, [id], (err) => {
+        if (err) return reject(err);
+        resolve(true);
+      });
+    });
   },
 
   // Get reports within date range
   async getReportsByDateRange(startDate, endDate) {
-    try {
-      const reports = db.all(
-        `
-        SELECT * FROM ${TABLE_NAME}
-        WHERE created_at >= ? AND created_at <= ?
-        ORDER BY created_at DESC
-      `,
-        [startDate, endDate]
+    return new Promise((resolve, reject) => {
+      db.all(
+        `SELECT * FROM ${TABLE_NAME} WHERE created_at >= ? AND created_at <= ? ORDER BY created_at DESC`,
+        [startDate, endDate],
+        (err, rows) => {
+          if (err) return reject(err);
+          resolve(
+            (rows || []).map((r) => ({
+              ...r,
+              data: JSON.parse(r.data || "{}"),
+            })),
+          );
+        },
       );
-
-      return reports.map((report) => ({
-        ...report,
-        id: report.id,
-        data: JSON.parse(report.data || "{}"),
-      }));
-    } catch (error) {
-      console.error("Error getting reports by date range:", error);
-      throw error;
-    }
+    });
   },
 
   // Get report statistics
   async getReportStats() {
-    try {
-      const stats = db.all(`
-        SELECT type, COUNT(*) as count, MAX(created_at) as latest
-        FROM ${TABLE_NAME}
-        GROUP BY type
-      `);
-
-      const totalReports = db.get(
-        `SELECT COUNT(*) as total FROM ${TABLE_NAME}`
-      ).total;
-
-      return {
-        total: totalReports,
-        byType: stats,
-      };
-    } catch (error) {
-      console.error("Error getting report stats:", error);
-      throw error;
-    }
+    return new Promise((resolve, reject) => {
+      db.all(
+        `SELECT type, COUNT(*) as count, MAX(created_at) as latest FROM ${TABLE_NAME} GROUP BY type`,
+        [],
+        (err, stats) => {
+          if (err) return reject(err);
+          db.get(
+            `SELECT COUNT(*) as total FROM ${TABLE_NAME}`,
+            [],
+            (err2, row) => {
+              if (err2) return reject(err2);
+              resolve({ total: row ? row.total : 0, byType: stats || [] });
+            },
+          );
+        },
+      );
+    });
   },
 };
 

@@ -5,8 +5,6 @@ const env = cleanEnv(process.env, {
   NODE_ENV: str({ default: "development" }),
   PORT: num({ default: 5000 }),
   DB_PATH: str({ default: "./database/dmautomation.db" }),
-  API_KEYS_READ: str({ default: "" }), // comma-separated read-only keys
-  API_KEYS_MUTATE: str({ default: "" }), // comma-separated mutation keys
   DM_BETWEEN_MIN_MS: num({ default: 5000 }),
   DM_BETWEEN_MAX_MS: num({ default: 15000 }),
   DM_TYPING_MIN_MS: num({ default: 40 }),
@@ -21,7 +19,7 @@ const env = cleanEnv(process.env, {
   USER_AGENTS: str({ default: "" }), // optional pipe-separated list
 });
 
-// Parse API key lists and user agents
+// Parse user agents list
 const parseList = (val) =>
   val
     ? val
@@ -29,18 +27,12 @@ const parseList = (val) =>
         .map((s) => s.trim())
         .filter(Boolean)
     : [];
-const readOnlyKeys = new Set(parseList(env.API_KEYS_READ));
-const mutateKeys = new Set(parseList(env.API_KEYS_MUTATE));
 const userAgents = parseList(env.USER_AGENTS);
 
 const config = {
   env: env.NODE_ENV,
   port: env.PORT,
   dbPath: env.DB_PATH,
-  apiKeys: {
-    read: readOnlyKeys,
-    mutate: mutateKeys,
-  },
   dm: {
     delays: {
       typing: { min: env.DM_TYPING_MIN_MS, max: env.DM_TYPING_MAX_MS },

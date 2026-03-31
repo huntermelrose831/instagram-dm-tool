@@ -19,6 +19,9 @@ import {
   MdWork,
 } from "react-icons/md";
 
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL || "http://localhost:5001";
+
 const TeamCollaboration = () => {
   const [activeTab, setActiveTab] = useState("members");
   const [teamMembers, setTeamMembers] = useState([]);
@@ -57,11 +60,11 @@ const TeamCollaboration = () => {
       setLoading(true);
       const [membersRes, rolesRes, templatesRes, workspacesRes, activityRes] =
         await Promise.all([
-          fetch("/api/team/members"),
-          fetch("/api/team/roles"),
-          fetch("/api/team/templates"),
-          fetch("/api/team/workspaces"),
-          fetch("/api/team/activity"),
+          fetch(`${API_BASE_URL}/api/team/members`),
+          fetch(`${API_BASE_URL}/api/team/roles`),
+          fetch(`${API_BASE_URL}/api/team/templates`),
+          fetch(`${API_BASE_URL}/api/team/workspaces`),
+          fetch(`${API_BASE_URL}/api/team/activity`),
         ]);
 
       const [members, rolesData, templates, workspacesData, activity] =
@@ -88,7 +91,7 @@ const TeamCollaboration = () => {
   const handleInviteMember = async () => {
     try {
       setLoading(true);
-      const response = await fetch("/api/team/invite", {
+      const response = await fetch(`${API_BASE_URL}/api/team/invite`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(inviteForm),
@@ -114,7 +117,7 @@ const TeamCollaboration = () => {
   const handleCreateRole = async () => {
     try {
       setLoading(true);
-      const response = await fetch("/api/team/roles", {
+      const response = await fetch(`${API_BASE_URL}/api/team/roles`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(roleForm),
@@ -142,10 +145,10 @@ const TeamCollaboration = () => {
       const response = await fetch(
         `${API_BASE_URL}/api/team/members/${memberId}/role`,
         {
-          method: "PUT",
+          method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ role: newRole }),
-        }
+        },
       );
 
       if (response.ok) {
@@ -171,143 +174,6 @@ const TeamCollaboration = () => {
     { id: "team_admin", label: "Team Administration", category: "admin" },
     { id: "billing_access", label: "Billing Access", category: "admin" },
     { id: "api_access", label: "API Access", category: "developer" },
-  ];
-
-  const mockTeamMembers = [
-    {
-      id: 1,
-      name: "John Smith",
-      email: "john@company.com",
-      role: "admin",
-      status: "active",
-      lastActive: "2024-12-20 10:30",
-      joinedAt: "2024-01-15",
-      avatar: null,
-      workspaces: ["main", "campaign-team"],
-    },
-    {
-      id: 2,
-      name: "Sarah Johnson",
-      email: "sarah@company.com",
-      role: "manager",
-      status: "active",
-      lastActive: "2024-12-20 09:15",
-      joinedAt: "2024-03-10",
-      avatar: null,
-      workspaces: ["main"],
-    },
-    {
-      id: 3,
-      name: "Mike Wilson",
-      email: "mike@company.com",
-      role: "member",
-      status: "invited",
-      lastActive: null,
-      joinedAt: "2024-12-19",
-      avatar: null,
-      workspaces: ["campaign-team"],
-    },
-  ];
-
-  const mockRoles = [
-    {
-      id: "admin",
-      name: "Administrator",
-      description: "Full access to all features and settings",
-      permissions: availablePermissions.map((p) => p.id),
-      color: "#EF4444",
-      memberCount: 1,
-    },
-    {
-      id: "manager",
-      name: "Manager",
-      description: "Can manage campaigns and view analytics",
-      permissions: [
-        "view_dashboard",
-        "send_messages",
-        "manage_campaigns",
-        "view_analytics",
-        "manage_leads",
-      ],
-      color: "#F59E0B",
-      memberCount: 1,
-    },
-    {
-      id: "member",
-      name: "Team Member",
-      description: "Basic access to messaging and lead management",
-      permissions: ["view_dashboard", "send_messages", "manage_leads"],
-      color: "#3B82F6",
-      memberCount: 3,
-    },
-  ];
-
-  const mockSharedTemplates = [
-    {
-      id: 1,
-      name: "Cold Outreach Template",
-      type: "message",
-      createdBy: "John Smith",
-      createdAt: "2024-12-15",
-      usage: 45,
-      shared: true,
-      workspaces: ["main", "campaign-team"],
-    },
-    {
-      id: 2,
-      name: "Follow-up Sequence",
-      type: "automation",
-      createdBy: "Sarah Johnson",
-      createdAt: "2024-12-18",
-      usage: 23,
-      shared: true,
-      workspaces: ["main"],
-    },
-    {
-      id: 3,
-      name: "Lead Qualification Flow",
-      type: "workflow",
-      createdBy: "Mike Wilson",
-      createdAt: "2024-12-19",
-      usage: 12,
-      shared: false,
-      workspaces: ["campaign-team"],
-    },
-  ];
-
-  const mockActivity = [
-    {
-      id: 1,
-      user: "John Smith",
-      action: "invited new member",
-      target: "mike@company.com",
-      timestamp: "2024-12-20 10:30",
-      type: "member",
-    },
-    {
-      id: 2,
-      user: "Sarah Johnson",
-      action: "shared template",
-      target: "Follow-up Sequence",
-      timestamp: "2024-12-20 09:15",
-      type: "template",
-    },
-    {
-      id: 3,
-      user: "John Smith",
-      action: "updated role permissions",
-      target: "Manager role",
-      timestamp: "2024-12-19 16:45",
-      type: "role",
-    },
-    {
-      id: 4,
-      user: "Mike Wilson",
-      action: "joined workspace",
-      target: "Campaign Team",
-      timestamp: "2024-12-19 14:20",
-      type: "workspace",
-    },
   ];
 
   const getRoleIcon = (role) => {
@@ -380,7 +246,7 @@ const TeamCollaboration = () => {
                 Team Members
               </h2>
               <span className="bg-gray-100 text-gray-600 px-3 py-1 rounded-full text-sm">
-                {mockTeamMembers.length} members
+                {teamMembers.length} members
               </span>
             </div>
             <button
@@ -419,7 +285,7 @@ const TeamCollaboration = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {mockTeamMembers.map((member) => {
+                  {teamMembers.map((member) => {
                     const RoleIcon = getRoleIcon(member.role);
                     return (
                       <tr key={member.id} className="hover:bg-gray-50">
@@ -469,7 +335,7 @@ const TeamCollaboration = () => {
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex flex-wrap gap-1">
-                            {member.workspaces.map((workspace) => (
+                            {(member.workspaces || []).map((workspace) => (
                               <span
                                 key={workspace}
                                 className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs"
@@ -531,7 +397,7 @@ const TeamCollaboration = () => {
 
           {/* Roles Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {mockRoles.map((role) => (
+            {roles.map((role) => (
               <div
                 key={role.id}
                 className="bg-white border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow"
@@ -540,14 +406,14 @@ const TeamCollaboration = () => {
                   <div className="flex items-center">
                     <div
                       className="w-4 h-4 rounded-full mr-3"
-                      style={{ backgroundColor: role.color }}
+                      style={{ backgroundColor: role.color || "#6B7280" }}
                     ></div>
                     <h3 className="text-lg font-semibold text-gray-900">
                       {role.name}
                     </h3>
                   </div>
                   <span className="bg-gray-100 text-gray-600 px-2 py-1 rounded-full text-xs">
-                    {role.memberCount} members
+                    {role.memberCount || 0} members
                   </span>
                 </div>
                 <p className="text-gray-600 mb-4">{role.description}</p>
@@ -558,7 +424,7 @@ const TeamCollaboration = () => {
                   <div className="flex flex-wrap gap-1">
                     {role.permissions.slice(0, 4).map((permissionId) => {
                       const permission = availablePermissions.find(
-                        (p) => p.id === permissionId
+                        (p) => p.id === permissionId,
                       );
                       return permission ? (
                         <span
@@ -623,7 +489,7 @@ const TeamCollaboration = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {mockSharedTemplates.map((template) => (
+                  {sharedTemplates.map((template) => (
                     <tr key={template.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4">
                         <div className="flex items-center">
@@ -633,7 +499,8 @@ const TeamCollaboration = () => {
                               {template.name}
                             </div>
                             <div className="text-gray-500 text-xs">
-                              Created {template.createdAt}
+                              Created{" "}
+                              {template.created_at || template.createdAt || ""}
                             </div>
                           </div>
                         </div>
@@ -652,14 +519,16 @@ const TeamCollaboration = () => {
                         </span>
                       </td>
                       <td className="px-6 py-4 text-gray-600">
-                        {template.createdBy}
+                        {template.created_by || template.createdBy || ""}
                       </td>
                       <td className="px-6 py-4 text-gray-600">
-                        {template.usage} times
+                        {template.usage != null
+                          ? `${template.usage} times`
+                          : ""}
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex flex-wrap gap-1">
-                          {template.workspaces.map((workspace) => (
+                          {(template.workspaces || []).map((workspace) => (
                             <span
                               key={workspace}
                               className="bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs"
@@ -701,7 +570,7 @@ const TeamCollaboration = () => {
 
           <div className="bg-white border border-gray-200 rounded-lg">
             <div className="p-6 space-y-4">
-              {mockActivity.map((activity) => (
+              {activityLog.map((activity) => (
                 <div
                   key={activity.id}
                   className="flex items-start space-x-4 pb-4 border-b border-gray-100 last:border-b-0"
@@ -712,25 +581,14 @@ const TeamCollaboration = () => {
                   <div className="flex-1">
                     <div className="text-sm text-gray-900">
                       <span className="font-medium">{activity.user}</span>{" "}
-                      {activity.action}{" "}
-                      <span className="font-medium">{activity.target}</span>
+                      {activity.action}
                     </div>
                     <div className="text-xs text-gray-500 mt-1">
                       {activity.timestamp}
                     </div>
                   </div>
-                  <span
-                    className={`px-2 py-1 rounded-full text-xs font-medium ${
-                      activity.type === "member"
-                        ? "bg-green-100 text-green-800"
-                        : activity.type === "template"
-                          ? "bg-blue-100 text-blue-800"
-                          : activity.type === "role"
-                            ? "bg-yellow-100 text-yellow-800"
-                            : "bg-purple-100 text-purple-800"
-                    }`}
-                  >
-                    {activity.type}
+                  <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                    action
                   </span>
                 </div>
               ))}
@@ -782,7 +640,7 @@ const TeamCollaboration = () => {
                   }
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 >
-                  {mockRoles.map((role) => (
+                  {roles.map((role) => (
                     <option key={role.id} value={role.id}>
                       {role.name}
                     </option>

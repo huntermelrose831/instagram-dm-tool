@@ -2,21 +2,28 @@
  * TurboDM Authentication Service (Electron Main Process)
  *
  * Handles login, verify, logout against https://turbodm.pro/api/desktop/*
- * Stores tokens securely via keytar (OS credential manager).
+ * Stores tokens securely via Electron safeStorage (DPAPI on Windows,
+ * Keychain on macOS, libsecret on Linux) — no native module required.
  * Tracks lastSuccessfulVerify for 72-hour offline grace period.
  */
 
-const keytar = require("keytar");
 const https = require("https");
 const fs = require("fs");
 const path = require("path");
+const { app, safeStorage } = require("electron");
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const BASE_URL = "https://turbodm.pro";
-const KEYTAR_SERVICE = "TurboDM";
-const KEYTAR_ACCOUNT_META = "__meta__"; // stores JSON { email, lastSuccessfulVerify }
 const REQUEST_TIMEOUT_MS = 10_000;
 const OFFLINE_GRACE_MS = 72 * 60 * 60 * 1000; // 72 hours
+
+// ── Storage paths (inside Electron userData dir) ───────────────────────────
+function getCredFile() {
+  return path.join(app.getPath("userData"), "auth.enc");
+}
+function getMetaFile() {
+  return path.join(app.getPath("userData"), "auth.meta.json");
+}
 
 // ── Internal helpers ───────────────────────────────────────────────────────
 
@@ -73,65 +80,100 @@ function isNetworkOrServerError(err, status) {
   return false;
 }
 
+// ── Secure token storage via safeStorage ──────────────────────────────────
+
+function encryptionAvailable() {
+  try {
+    return safeStorage.isEncryptionAvailable();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Write the token to disk, encrypted with safeStorage (OS keychain/DPAPI).
+ * Falls back to base64 obfuscation when safeStorage is unavailable.
+ */
+function writeToken(token) {
+  const credFile = getCredFile();
+  if (encryptionAvailable()) {
+    const encrypted = safeStorage.encryptString(token);
+    fs.writeFileSync(credFile, encrypted);
+  } else {
+    fs.writeFileSync(credFile, Buffer.from(token).toString("base64"), "utf8");
+  }
+}
+
+function readToken() {
+  try {
+    const credFile = getCredFile();
+    if (!fs.existsSync(credFile)) return null;
+    if (encryptionAvailable()) {
+      const data = fs.readFileSync(credFile);
+      return safeStorage.decryptString(data);
+    } else {
+      const raw = fs.readFileSync(credFile, "utf8");
+      return Buffer.from(raw, "base64").toString("utf8");
+    }
+  } catch {
+    return null;
+  }
+}
+
+function deleteToken() {
+  try {
+    const credFile = getCredFile();
+    if (fs.existsSync(credFile)) fs.unlinkSync(credFile);
+  } catch {}
+}
+
 // ── Persistent metadata (email + lastSuccessfulVerify) ─────────────────────
 
-let _metaCache = null;
-
-async function readMeta() {
-  if (_metaCache) return _metaCache;
+function readMeta() {
   try {
-    const raw = await keytar.getPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT_META);
-    if (raw) {
-      _metaCache = JSON.parse(raw);
-      return _metaCache;
-    }
-  } catch {}
-  return {};
+    const metaFile = getMetaFile();
+    if (!fs.existsSync(metaFile)) return {};
+    return JSON.parse(fs.readFileSync(metaFile, "utf8"));
+  } catch {
+    return {};
+  }
 }
 
-async function writeMeta(obj) {
-  _metaCache = { ...(await readMeta()), ...obj };
-  await keytar.setPassword(
-    KEYTAR_SERVICE,
-    KEYTAR_ACCOUNT_META,
-    JSON.stringify(_metaCache),
-  );
-}
-
-async function clearMeta() {
-  _metaCache = null;
+function writeMeta(obj) {
   try {
-    await keytar.deletePassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT_META);
+    const updated = { ...readMeta(), ...obj };
+    fs.writeFileSync(getMetaFile(), JSON.stringify(updated), "utf8");
   } catch {}
 }
 
-// ── Token storage ──────────────────────────────────────────────────────────
+function deleteMeta() {
+  try {
+    const metaFile = getMetaFile();
+    if (fs.existsSync(metaFile)) fs.unlinkSync(metaFile);
+  } catch {}
+}
 
-async function storeToken(email, token) {
-  await keytar.setPassword(KEYTAR_SERVICE, email, token);
-  await writeMeta({ email, lastSuccessfulVerify: Date.now() });
+// ── Combined credential helpers ────────────────────────────────────────────
+
+async function storeCredentials(email, token) {
+  writeToken(token);
+  writeMeta({ email, lastSuccessfulVerify: Date.now() });
 }
 
 async function getStoredCredentials() {
-  const meta = await readMeta();
-  if (!meta.email) return null;
-  const token = await keytar.getPassword(KEYTAR_SERVICE, meta.email);
+  const token = readToken();
   if (!token) return null;
+  const meta = readMeta();
   return {
-    email: meta.email,
     token,
+    email: meta.email || "",
     lastSuccessfulVerify: meta.lastSuccessfulVerify || 0,
   };
 }
 
 async function deleteStoredCredentials() {
-  const meta = await readMeta();
-  if (meta.email) {
-    try {
-      await keytar.deletePassword(KEYTAR_SERVICE, meta.email);
-    } catch {}
-  }
-  await clearMeta();
+  deleteToken();
+  deleteMeta();
 }
 
 // ── Error-code → user-friendly message mapping ────────────────────────────
@@ -169,7 +211,7 @@ async function login(email, password) {
     });
 
     if (status === 200 && body.token) {
-      await storeToken(email, body.token);
+      await storeCredentials(email, body.token);
       return { success: true, user: body.user };
     }
 
@@ -180,7 +222,7 @@ async function login(email, password) {
       body.message ||
       "Login failed. Please try again.";
     return { success: false, error: message };
-  } catch (err) {
+  } catch {
     return {
       success: false,
       error: "Could not reach the server. Check your internet connection.",

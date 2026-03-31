@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import {
   FaEnvelope,
@@ -11,7 +11,45 @@ import {
   FaPlay,
 } from "react-icons/fa";
 
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL || "http://localhost:5001";
+
 const Home = () => {
+  const [stats, setStats] = useState(null);
+  const [statsLoading, setStatsLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const [accountsRes, targetsRes, contactsRes, reportsRes] =
+          await Promise.all([
+            fetch(`${API_BASE_URL}/api/accounts`),
+            fetch(`${API_BASE_URL}/api/targets`),
+            fetch(`${API_BASE_URL}/api/crm/contacts`),
+            fetch(`${API_BASE_URL}/api/reports/stats`),
+          ]);
+        const [accounts, targetsData, crmData, reportStats] = await Promise.all(
+          [
+            accountsRes.json(),
+            targetsRes.json(),
+            contactsRes.json(),
+            reportsRes.json(),
+          ],
+        );
+        setStats({
+          accounts: Array.isArray(accounts) ? accounts.length : 0,
+          targets: (targetsData.targets || []).length,
+          contacts: (crmData.contacts || []).length,
+          dmsSent: reportStats.total || 0,
+        });
+      } catch (err) {
+        console.error("Failed to load stats:", err);
+      } finally {
+        setStatsLoading(false);
+      }
+    };
+    fetchStats();
+  }, []);
   const features = [
     {
       to: "/send-dm",
@@ -115,22 +153,30 @@ const Home = () => {
       <div className="border-t border-gray-200 bg-gray-50">
         <div className="px-8 py-16">
           <div className="max-w-4xl mx-auto">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8 text-center">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-8 text-center">
               <div>
                 <div className="text-3xl font-bold text-green-600 mb-2">
-                  10K+
+                  {statsLoading ? "…" : (stats?.dmsSent ?? 0)}
                 </div>
-                <div className="text-gray-600">Messages Sent</div>
+                <div className="text-gray-600">DMs Sent</div>
               </div>
               <div>
-                <div className="text-3xl font-bold text-blue-600 mb-2">85%</div>
-                <div className="text-gray-600">Success Rate</div>
+                <div className="text-3xl font-bold text-blue-600 mb-2">
+                  {statsLoading ? "…" : (stats?.targets ?? 0)}
+                </div>
+                <div className="text-gray-600">Targets</div>
               </div>
               <div>
                 <div className="text-3xl font-bold text-purple-600 mb-2">
-                  24/7
+                  {statsLoading ? "…" : (stats?.contacts ?? 0)}
                 </div>
-                <div className="text-gray-600">Automation</div>
+                <div className="text-gray-600">CRM Contacts</div>
+              </div>
+              <div>
+                <div className="text-3xl font-bold text-yellow-600 mb-2">
+                  {statsLoading ? "…" : (stats?.accounts ?? 0)}
+                </div>
+                <div className="text-gray-600">Accounts</div>
               </div>
             </div>
           </div>

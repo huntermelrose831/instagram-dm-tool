@@ -93,59 +93,64 @@ const init = async () => {
 
 // Contact operations
 async function createContact(username) {
-  try {
-    const existingContact = db.get(
+  return new Promise((resolve, reject) => {
+    db.get(
       `SELECT * FROM ${CONTACTS_TABLE} WHERE username = ?`,
-      [username]
+      [username],
+      (err, existingContact) => {
+        if (err) return reject(err);
+
+        if (existingContact) {
+          // Update existing contact
+          db.run(
+            `UPDATE ${CONTACTS_TABLE} SET updated_at = ? WHERE username = ?`,
+            [new Date().toISOString(), username],
+            (updateErr) => {
+              if (updateErr) return reject(updateErr);
+              resolve({ id: existingContact.id, ...existingContact });
+            },
+          );
+          return;
+        }
+
+        const now = new Date().toISOString();
+        db.run(
+          `INSERT INTO ${CONTACTS_TABLE} (username, status, tags, notes, messages_sent, responses_received, last_interaction, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            username,
+            "lead",
+            JSON.stringify([]),
+            JSON.stringify([]),
+            0,
+            0,
+            null,
+            now,
+            now,
+          ],
+          function (insertErr) {
+            if (insertErr) return reject(insertErr);
+            resolve({
+              id: this.lastID,
+              username,
+              status: "lead",
+              tags: JSON.stringify([]),
+              notes: JSON.stringify([]),
+              messages_sent: 0,
+              responses_received: 0,
+              last_interaction: null,
+              created_at: now,
+              updated_at: now,
+            });
+          },
+        );
+      },
     );
-    if (existingContact) {
-      // Update existing contact
-      db.run(`UPDATE ${CONTACTS_TABLE} SET updated_at = ? WHERE username = ?`, [
-        new Date().toISOString(),
-        username,
-      ]);
-      return { id: existingContact.id, ...existingContact };
-    }
-
-    const contactData = {
-      username,
-      status: "lead",
-      tags: JSON.stringify([]),
-      notes: JSON.stringify([]),
-      messages_sent: 0,
-      responses_received: 0,
-      last_interaction: null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-
-    const result = db.run(
-      `
-      INSERT INTO ${CONTACTS_TABLE} (username, status, tags, notes, messages_sent, responses_received, last_interaction, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `,
-      [
-        contactData.username,
-        contactData.status,
-        contactData.tags,
-        contactData.notes,
-        contactData.messages_sent,
-        contactData.responses_received,
-        contactData.last_interaction,
-        contactData.created_at,
-        contactData.updated_at,
-      ]
-    );
-
-    return { id: result.lastInsertRowid, ...contactData };
-  } catch (error) {
-    console.error("Error creating contact:", error);
-    throw error;
-  }
+  });
 }
 
 async function getContacts(filters = {}) {
-  try {
+  return new Promise((resolve, reject) => {
     let query = `SELECT * FROM ${CONTACTS_TABLE}`;
     const conditions = [];
     const params = [];
@@ -171,275 +176,270 @@ async function getContacts(filters = {}) {
 
     query += " ORDER BY last_interaction DESC, created_at DESC";
 
-    const contacts = db.all(query, params);
+    db.all(query, params, (err, contacts) => {
+      if (err) return reject(err);
+      if (!contacts) return resolve([]);
 
-    // Get notes for each contact
-    const contactsWithNotes = contacts.map((contact) => {
-      const notes = db.all(
-        `SELECT * FROM ${NOTES_TABLE} WHERE contact_id = ? ORDER BY created_at DESC`,
-        [contact.id]
-      );
-      return {
-        ...contact,
-        id: contact.id,
-        tags: JSON.parse(contact.tags || "[]"),
-        notes: notes || [],
-      };
+      // Get notes for each contact
+      let completed = 0;
+      if (contacts.length === 0) return resolve([]);
+
+      const results = [];
+      contacts.forEach((contact, idx) => {
+        db.all(
+          `SELECT * FROM ${NOTES_TABLE} WHERE contact_id = ? ORDER BY created_at DESC`,
+          [contact.id],
+          (noteErr, notes) => {
+            results[idx] = {
+              ...contact,
+              id: contact.id,
+              tags: JSON.parse(contact.tags || "[]"),
+              notes: noteErr ? [] : notes || [],
+            };
+            completed++;
+            if (completed === contacts.length) {
+              resolve(results);
+            }
+          },
+        );
+      });
     });
-
-    return contactsWithNotes;
-  } catch (error) {
-    console.error("Error getting contacts:", error);
-    throw error;
-  }
+  });
 }
 
 async function updateContactStatus(contactId, status) {
   const validStatuses = ["lead", "prospect", "customer", "inactive"];
   if (!validStatuses.includes(status)) {
     throw new Error(
-      `Invalid status: ${status}. Must be one of: ${validStatuses.join(", ")}`
+      `Invalid status: ${status}. Must be one of: ${validStatuses.join(", ")}`,
     );
   }
 
-  try {
+  return new Promise((resolve, reject) => {
     db.run(
-      `
-      UPDATE ${CONTACTS_TABLE}
-      SET status = ?, updated_at = ?
-      WHERE id = ?
-    `,
-      [status, new Date().toISOString(), contactId]
+      `UPDATE ${CONTACTS_TABLE} SET status = ?, updated_at = ? WHERE id = ?`,
+      [status, new Date().toISOString(), contactId],
+      (err) => {
+        if (err) return reject(err);
+        getContacts({ id: contactId })
+          .then((contacts) => resolve(contacts[0]))
+          .catch(reject);
+      },
     );
-
-    // Return updated contact
-    const contacts = await getContacts({ id: contactId });
-    return contacts[0];
-  } catch (error) {
-    console.error("Error updating contact status:", error);
-    throw error;
-  }
+  });
 }
 
 // Note operations
 async function addNote(contactId, content) {
-  try {
-    const noteData = {
-      contact_id: contactId,
-      content,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-
-    const result = db.run(
-      `
-      INSERT INTO ${NOTES_TABLE} (contact_id, content, created_at, updated_at)
-      VALUES (?, ?, ?, ?)
-    `,
-      [
-        noteData.contact_id,
-        noteData.content,
-        noteData.created_at,
-        noteData.updated_at,
-      ]
+  const now = new Date().toISOString();
+  return new Promise((resolve, reject) => {
+    db.run(
+      `INSERT INTO ${NOTES_TABLE} (contact_id, content, created_at, updated_at) VALUES (?, ?, ?, ?)`,
+      [contactId, content, now, now],
+      function (err) {
+        if (err) return reject(err);
+        resolve({
+          id: this.lastID,
+          contact_id: contactId,
+          content,
+          created_at: now,
+          updated_at: now,
+        });
+      },
     );
-
-    return { id: result.lastInsertRowid, ...noteData };
-  } catch (error) {
-    console.error("Error adding note:", error);
-    throw error;
-  }
+  });
 }
 
 // Tag operations
 async function createTag(name) {
-  try {
-    const existingTag = db.get(`SELECT * FROM ${TAGS_TABLE} WHERE name = ?`, [
-      name,
-    ]);
-    if (existingTag) {
-      return existingTag;
-    }
+  return new Promise((resolve, reject) => {
+    db.get(
+      `SELECT * FROM ${TAGS_TABLE} WHERE name = ?`,
+      [name],
+      (err, existing) => {
+        if (err) return reject(err);
+        if (existing) return resolve(existing);
 
-    const tagData = {
-      name,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-
-    const result = db.run(
-      `
-      INSERT INTO ${TAGS_TABLE} (name, created_at, updated_at)
-      VALUES (?, ?, ?)
-    `,
-      [tagData.name, tagData.created_at, tagData.updated_at]
+        const now = new Date().toISOString();
+        db.run(
+          `INSERT INTO ${TAGS_TABLE} (name, created_at, updated_at) VALUES (?, ?, ?)`,
+          [name, now, now],
+          function (insertErr) {
+            if (insertErr) return reject(insertErr);
+            resolve({
+              id: this.lastID,
+              name,
+              created_at: now,
+              updated_at: now,
+            });
+          },
+        );
+      },
     );
-
-    return { id: result.lastInsertRowid, ...tagData };
-  } catch (error) {
-    console.error("Error creating tag:", error);
-    throw error;
-  }
+  });
 }
 
 async function addTagToContact(contactId, tagName) {
-  try {
-    await createTag(tagName); // Ensure tag exists
+  await createTag(tagName);
+  return new Promise((resolve, reject) => {
+    db.get(
+      `SELECT tags FROM ${CONTACTS_TABLE} WHERE id = ?`,
+      [contactId],
+      (err, contact) => {
+        if (err) return reject(err);
+        if (!contact) return resolve();
 
-    const contact = db.get(`SELECT tags FROM ${CONTACTS_TABLE} WHERE id = ?`, [
-      contactId,
-    ]);
-    if (!contact) return;
-
-    const tags = JSON.parse(contact.tags || "[]");
-    if (!tags.includes(tagName)) {
-      tags.push(tagName);
-      db.run(
-        `
-        UPDATE ${CONTACTS_TABLE}
-        SET tags = ?, updated_at = ?
-        WHERE id = ?
-      `,
-        [JSON.stringify(tags), new Date().toISOString(), contactId]
-      );
-    }
-  } catch (error) {
-    console.error("Error adding tag to contact:", error);
-    throw error;
-  }
+        const tags = JSON.parse(contact.tags || "[]");
+        if (!tags.includes(tagName)) {
+          tags.push(tagName);
+          db.run(
+            `UPDATE ${CONTACTS_TABLE} SET tags = ?, updated_at = ? WHERE id = ?`,
+            [JSON.stringify(tags), new Date().toISOString(), contactId],
+            (updateErr) => {
+              if (updateErr) return reject(updateErr);
+              resolve();
+            },
+          );
+        } else {
+          resolve();
+        }
+      },
+    );
+  });
 }
 
 async function removeTagFromContact(contactId, tagName) {
-  try {
-    const contact = db.get(`SELECT tags FROM ${CONTACTS_TABLE} WHERE id = ?`, [
-      contactId,
-    ]);
-    if (!contact) return;
+  return new Promise((resolve, reject) => {
+    db.get(
+      `SELECT tags FROM ${CONTACTS_TABLE} WHERE id = ?`,
+      [contactId],
+      (err, contact) => {
+        if (err) return reject(err);
+        if (!contact) return resolve();
 
-    const tags = JSON.parse(contact.tags || "[]");
-    const filteredTags = tags.filter((tag) => tag !== tagName);
+        const tags = JSON.parse(contact.tags || "[]");
+        const filteredTags = tags.filter((tag) => tag !== tagName);
 
-    db.run(
-      `
-      UPDATE ${CONTACTS_TABLE}
-      SET tags = ?, updated_at = ?
-      WHERE id = ?
-    `,
-      [JSON.stringify(filteredTags), new Date().toISOString(), contactId]
+        db.run(
+          `UPDATE ${CONTACTS_TABLE} SET tags = ?, updated_at = ? WHERE id = ?`,
+          [JSON.stringify(filteredTags), new Date().toISOString(), contactId],
+          (updateErr) => {
+            if (updateErr) return reject(updateErr);
+            resolve();
+          },
+        );
+      },
     );
-  } catch (error) {
-    console.error("Error removing tag from contact:", error);
-    throw error;
-  }
+  });
 }
 
 // Interaction tracking
 async function recordInteraction(contactId, type, content, campaignId = null) {
-  try {
-    const interactionData = {
-      contact_id: contactId,
-      type,
-      content,
-      campaign_id: campaignId,
-      created_at: new Date().toISOString(),
-    };
-
+  const now = new Date().toISOString();
+  return new Promise((resolve, reject) => {
     db.run(
-      `
-      INSERT INTO ${INTERACTIONS_TABLE} (contact_id, type, content, campaign_id, created_at)
-      VALUES (?, ?, ?, ?, ?)
-    `,
-      [
-        interactionData.contact_id,
-        interactionData.type,
-        interactionData.content,
-        interactionData.campaign_id,
-        interactionData.created_at,
-      ]
+      `INSERT INTO ${INTERACTIONS_TABLE} (contact_id, type, content, campaign_id, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+      [contactId, type, content, campaignId, now],
+      (insertErr) => {
+        if (insertErr) return reject(insertErr);
+
+        const updateFields = ["last_interaction = ?", "updated_at = ?"];
+        const values = [now, now];
+
+        if (type === "dm_sent") {
+          updateFields.push("messages_sent = messages_sent + 1");
+        } else if (type === "dm_received") {
+          updateFields.push("responses_received = responses_received + 1");
+        }
+
+        values.push(contactId);
+
+        db.run(
+          `UPDATE ${CONTACTS_TABLE} SET ${updateFields.join(", ")} WHERE id = ?`,
+          values,
+          (updateErr) => {
+            if (updateErr) return reject(updateErr);
+            resolve();
+          },
+        );
+      },
     );
-
-    // Update contact interaction counters
-    const updateFields = ["last_interaction = ?", "updated_at = ?"];
-    const values = [new Date().toISOString(), new Date().toISOString()];
-
-    if (type === "dm_sent") {
-      updateFields.push("messages_sent = messages_sent + 1");
-    } else if (type === "dm_received") {
-      updateFields.push("responses_received = responses_received + 1");
-    }
-
-    values.push(contactId);
-
-    db.run(
-      `
-      UPDATE ${CONTACTS_TABLE}
-      SET ${updateFields.join(", ")}
-      WHERE id = ?
-    `,
-      values
-    );
-  } catch (error) {
-    console.error("Error recording interaction:", error);
-    throw error;
-  }
+  });
 }
 
 async function deleteContact(contactId) {
-  try {
-    // Get contact before deletion
-    const existing = db.get(`SELECT * FROM ${CONTACTS_TABLE} WHERE id = ?`, [
-      contactId,
-    ]);
-    if (!existing) {
-      return { deleted: false };
-    }
+  return new Promise((resolve, reject) => {
+    db.get(
+      `SELECT * FROM ${CONTACTS_TABLE} WHERE id = ?`,
+      [contactId],
+      (err, existing) => {
+        if (err) return reject(err);
+        if (!existing) return resolve({ deleted: false });
 
-    // Delete related data (foreign keys will handle cascade)
-    db.run(`DELETE FROM ${NOTES_TABLE} WHERE contact_id = ?`, [contactId]);
-    db.run(`DELETE FROM ${INTERACTIONS_TABLE} WHERE contact_id = ?`, [
-      contactId,
-    ]);
-
-    // Delete contact
-    db.run(`DELETE FROM ${CONTACTS_TABLE} WHERE id = ?`, [contactId]);
-
-    return {
-      deleted: true,
-      contact: { ...existing, id: existing.id },
-    };
-  } catch (error) {
-    console.error("Error deleting contact:", error);
-    throw error;
-  }
+        db.run(
+          `DELETE FROM ${NOTES_TABLE} WHERE contact_id = ?`,
+          [contactId],
+          () => {
+            db.run(
+              `DELETE FROM ${INTERACTIONS_TABLE} WHERE contact_id = ?`,
+              [contactId],
+              () => {
+                db.run(
+                  `DELETE FROM ${CONTACTS_TABLE} WHERE id = ?`,
+                  [contactId],
+                  (delErr) => {
+                    if (delErr) return reject(delErr);
+                    resolve({
+                      deleted: true,
+                      contact: { ...existing, id: existing.id },
+                    });
+                  },
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  });
 }
 
 async function deleteContactByUsername(username) {
-  try {
-    const contact = db.get(
+  return new Promise((resolve, reject) => {
+    db.get(
       `SELECT * FROM ${CONTACTS_TABLE} WHERE username = ?`,
-      [username]
+      [username],
+      (err, contact) => {
+        if (err) return reject(err);
+        if (!contact) return resolve({ deleted: false });
+
+        db.run(
+          `DELETE FROM ${NOTES_TABLE} WHERE contact_id = ?`,
+          [contact.id],
+          () => {
+            db.run(
+              `DELETE FROM ${INTERACTIONS_TABLE} WHERE contact_id = ?`,
+              [contact.id],
+              () => {
+                db.run(
+                  `DELETE FROM ${CONTACTS_TABLE} WHERE username = ?`,
+                  [username],
+                  (delErr) => {
+                    if (delErr) return reject(delErr);
+                    resolve({
+                      deleted: true,
+                      contact: { ...contact, id: contact.id },
+                    });
+                  },
+                );
+              },
+            );
+          },
+        );
+      },
     );
-    if (!contact) {
-      return { deleted: false };
-    }
-
-    // Delete related data
-    db.run(`DELETE FROM ${NOTES_TABLE} WHERE contact_id = ?`, [contact.id]);
-    db.run(`DELETE FROM ${INTERACTIONS_TABLE} WHERE contact_id = ?`, [
-      contact.id,
-    ]);
-
-    // Delete contact
-    db.run(`DELETE FROM ${CONTACTS_TABLE} WHERE username = ?`, [username]);
-
-    return {
-      deleted: true,
-      contact: { ...contact, id: contact.id },
-    };
-  } catch (error) {
-    console.error("Error deleting contact by username:", error);
-    throw error;
-  }
+  });
 }
 
 // Initialize on module load

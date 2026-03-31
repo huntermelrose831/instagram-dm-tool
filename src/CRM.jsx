@@ -60,10 +60,13 @@ const CRM = () => {
       if (filterTag) queryParams.append("tag", filterTag);
 
       const response = await fetch(
-        `${API_BASE_URL}/api/crm/contacts?${queryParams}`
+        `${API_BASE_URL}/api/crm/contacts?${queryParams}`,
       );
       const data = await response.json();
-      if (data.status === "success") {
+      // Server returns a plain array of contacts
+      if (Array.isArray(data)) {
+        setContacts(data);
+      } else if (data.status === "success") {
         setContacts(data.contacts || []);
       } else {
         setError(data.message);
@@ -106,15 +109,22 @@ const CRM = () => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/crm/contacts`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify(newContact),
       });
 
-      const data = await response.json();
-      if (data.status === "success") {
+      if (response.ok) {
         fetchContacts();
         setNewContact({ username: "", email: "", phone: "", status: "lead" });
         setShowAddContact(false);
+      } else {
+        const data = await response.json().catch(() => ({}));
+        console.error(
+          "Failed to add contact:",
+          data.message || response.status,
+        );
       }
     } catch (error) {
       console.error("Failed to add contact:", error);
@@ -126,10 +136,12 @@ const CRM = () => {
       const response = await fetch(
         `${API_BASE_URL}/api/crm/contacts/${contactId}`,
         {
-          method: "PATCH", // changed from PUT to PATCH
-          headers: { "Content-Type": "application/json" },
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
           body: JSON.stringify({ status: newStatus }),
-        }
+        },
       );
 
       if (response.ok) {
@@ -153,7 +165,7 @@ const CRM = () => {
         `${API_BASE_URL}/api/crm/contacts/${contactId}`,
         {
           method: "DELETE",
-        }
+        },
       );
       if (response.ok) {
         setContacts((prev) => prev.filter((c) => c.id !== contactId));
@@ -175,9 +187,11 @@ const CRM = () => {
         `${API_BASE_URL}/api/crm/contacts/${selectedContact.id}/notes`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+          },
           body: JSON.stringify({ note: newNote }),
-        }
+        },
       );
 
       if (response.ok) {
@@ -217,7 +231,7 @@ const CRM = () => {
   const filteredContacts = contacts.filter(
     (contact) =>
       contact.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      contact.email?.toLowerCase().includes(searchTerm.toLowerCase())
+      contact.email?.toLowerCase().includes(searchTerm.toLowerCase()),
   );
 
   return (
@@ -335,7 +349,7 @@ const CRM = () => {
                             >
                               {
                                 statusOptions.find(
-                                  (s) => s.value === contact.status
+                                  (s) => s.value === contact.status,
                                 )?.label
                               }
                             </span>
@@ -343,7 +357,7 @@ const CRM = () => {
                               Last:{" "}
                               {contact.last_interaction
                                 ? new Date(
-                                    contact.last_interaction
+                                    contact.last_interaction,
                                   ).toLocaleDateString()
                                 : "Never"}
                             </p>
@@ -411,7 +425,7 @@ const CRM = () => {
                       <span className="text-black">
                         Added:{" "}
                         {new Date(
-                          selectedContact.created_at
+                          selectedContact.created_at,
                         ).toLocaleDateString()}
                       </span>
                     </div>

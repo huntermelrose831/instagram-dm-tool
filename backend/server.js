@@ -33,6 +33,12 @@ const {
   getContacts,
   updateContactStatus,
   recordInteraction,
+  addNote,
+  createTag,
+  addTagToContact,
+  removeTagFromContact,
+  deleteContact,
+  deleteContactByUsername,
   LeadsService,
   AccountsService,
   ScrapingService,
@@ -102,7 +108,7 @@ if (process.env.NODE_ENV === "production") {
           req.method === "GET"
         );
       },
-    })
+    }),
   );
 }
 
@@ -118,7 +124,7 @@ app.use(
       },
     },
     referrerPolicy: { policy: "same-origin" },
-  })
+  }),
 );
 
 // Rate limiting to prevent abuse
@@ -136,33 +142,7 @@ const apiLimiter = rateLimit({
   return apiLimiter(req, res, next);
 });*/
 
-// Robust API key validation for all API routes
-// Only require API key for non-GET requests
-app.use("/api", (req, res, next) => {
-  // Allow OPTIONS requests to pass through for CORS preflight
-  if (req.method === "OPTIONS") {
-    return next();
-  }
-  const apiKey = req.headers["x-api-key"];
-  if (req.method === "GET") {
-    // If you want GET requests to require a key, uncomment below
-    // const validKeys = (process.env.API_KEYS_READ || "").split(",").map(k => k.trim());
-    // if (!apiKey || !validKeys.includes(apiKey)) {
-    //   return res.status(401).send("Unauthorized");
-    // }
-    return next();
-  }
-  // For mutation requests
-  const validKeys = (process.env.API_KEYS_MUTATE || "")
-    .split(",")
-    .map((k) => k.trim());
-  if (!apiKey || !validKeys.includes(apiKey)) {
-    return res.status(401).send("Unauthorized");
-  }
-  next();
-});
-
-// Configure CORS properly for production
+// Configure CORS properly for production (must be before auth middleware)
 app.use(
   cors({
     origin:
@@ -171,9 +151,11 @@ app.use(
         : "*",
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-    allowedHeaders: ["Content-Type", "Authorization", "x-api-key"],
-  })
+    allowedHeaders: ["Content-Type", "Authorization"],
+  }),
 );
+
+// No API key auth required — this is a local Electron app on localhost
 
 // Body parser with size limits to prevent large payload attacks
 app.use(express.json({ limit: "1mb" }));
@@ -185,6 +167,18 @@ app.set("trust proxy", 1);
 const teamRoutes = require("./routes/team");
 app.use("/api/team", teamRoutes);
 
+// Feature routes
+const accountsRouter = require("./routes/accounts");
+const scrapeRouter = require("./routes/scrape");
+const targetsRouter = require("./routes/targets");
+const crmRouter = require("./routes/crm");
+const reportsRouter = require("./routes/reports");
+app.use("/api/accounts", accountsRouter);
+app.use("/api/scrape", scrapeRouter);
+app.use("/api", targetsRouter);
+app.use("/api/crm", crmRouter);
+app.use("/api", reportsRouter);
+
 // Progress tracking storage for DM sending sessions
 const progressSessions = new Map();
 
@@ -195,26 +189,32 @@ const generateSessionId = () => {
 
 // Health check endpoint
 app.get("/health", (req, res) => {
-  try {
-    // Check database connection
-    const dbCheck = db.prepare("SELECT 1").get();
+  const { db: rawDb } = require("./database/db");
+  const checkDb = rawDb
+    ? new Promise((resolve) =>
+        rawDb.get("SELECT 1 as ok", [], (err) => resolve(!err)),
+      )
+    : Promise.resolve(false);
 
-    res.json({
-      status: "healthy",
-      version: VERSION,
-      uptime: process.uptime(),
-      timestamp: new Date().toISOString(),
-      dbConnection: dbCheck ? "connected" : "error",
-      environment: process.env.NODE_ENV || "development",
+  checkDb
+    .then((dbOk) => {
+      res.json({
+        status: "healthy",
+        version: VERSION,
+        uptime: process.uptime(),
+        timestamp: new Date().toISOString(),
+        dbConnection: dbOk ? "connected" : "unavailable",
+        environment: process.env.NODE_ENV || "development",
+      });
+    })
+    .catch((error) => {
+      logger.error(`Health check failed: ${error.message}`);
+      res.status(500).json({
+        status: "unhealthy",
+        error: error.message,
+        timestamp: new Date().toISOString(),
+      });
     });
-  } catch (error) {
-    logger.error(`Health check failed: ${error.message}`);
-    res.status(500).json({
-      status: "unhealthy",
-      error: error.message,
-      timestamp: new Date().toISOString(),
-    });
-  }
 });
 
 app.post("/api/send-dms", validate("sendDM"), async (req, res, next) => {
@@ -239,7 +239,7 @@ app.post("/api/send-dms", validate("sendDM"), async (req, res, next) => {
     const accountUsername = account.username;
 
     logger.info(
-      `Processing DM request from ${accountUsername} to ${usernames.length} recipients`
+      `Processing DM request from ${accountUsername} to ${usernames.length} recipients`,
     );
 
     // Enforce daily DM cap before proceeding (immediate sends only)
@@ -260,7 +260,7 @@ app.post("/api/send-dms", validate("sendDM"), async (req, res, next) => {
         }
       } catch (capErr) {
         logger.warn(
-          `Daily cap pre-check failed for ${accountUsername}: ${capErr.message}`
+          `Daily cap pre-check failed for ${accountUsername}: ${capErr.message}`,
         );
       }
     }
@@ -293,14 +293,14 @@ app.post("/api/send-dms", validate("sendDM"), async (req, res, next) => {
         });
       } catch (scheduleError) {
         logger.error(
-          `Failed to schedule DM for ${accountUsername}: ${scheduleError.message}`
+          `Failed to schedule DM for ${accountUsername}: ${scheduleError.message}`,
         );
         return next(scheduleError);
       }
     } else {
       // Send immediately
       logger.info(
-        `Sending immediate DM from ${accountUsername} to ${usernames.length} recipients`
+        `Sending immediate DM from ${accountUsername} to ${usernames.length} recipients`,
       );
 
       await sendDMs({
@@ -340,7 +340,7 @@ app.post(
       const accountUsername = account.username;
 
       logger.info(
-        `Processing DM request with progress tracking from ${accountUsername} to ${usernames.length} recipients`
+        `Processing DM request with progress tracking from ${accountUsername} to ${usernames.length} recipients`,
       );
 
       // Enforce daily DM cap before proceeding
@@ -360,7 +360,7 @@ app.post(
         }
       } catch (capErr) {
         logger.warn(
-          `Daily cap pre-check failed for ${accountUsername}: ${capErr.message}`
+          `Daily cap pre-check failed for ${accountUsername}: ${capErr.message}`,
         );
       }
 
@@ -428,7 +428,7 @@ app.post(
             });
           }
           logger.error(
-            `DM sending with progress tracking failed: ${error.message}`
+            `DM sending with progress tracking failed: ${error.message}`,
           );
         }
 
@@ -437,7 +437,7 @@ app.post(
           () => {
             progressSessions.delete(sessionId);
           },
-          30 * 60 * 1000
+          30 * 60 * 1000,
         );
       });
 
@@ -450,7 +450,7 @@ app.post(
       logger.error(`DM progress sending error: ${err.message}`);
       next(err);
     }
-  }
+  },
 );
 
 // Get DM progress for a session
@@ -507,201 +507,7 @@ app.post("/api/add-account", validate("login"), async (req, res, next) => {
   }
 });
 
-app.get("/api/accounts", async (req, res) => {
-  try {
-    let accounts = (await AccountsService.getAccounts()) || [];
-    // Ensure every account has a valid email field and parse cookies
-    accounts = accounts.map((acc) => {
-      let parsedCookies = null;
-      if (acc.cookies) {
-        try {
-          parsedCookies =
-            typeof acc.cookies === "string"
-              ? JSON.parse(acc.cookies)
-              : acc.cookies;
-        } catch (parseError) {
-          console.error(
-            "Error parsing cookies for account:",
-            acc.username,
-            parseError
-          );
-          parsedCookies = null;
-        }
-      }
-      return {
-        ...acc,
-        email: acc.email || acc.username, // Use username if email is null
-        cookies: parsedCookies,
-      };
-    });
-    res.json(accounts);
-  } catch (error) {
-    console.error("Error fetching accounts:", error);
-    res.status(500).json({ status: "error", message: error.message });
-  }
-});
-
-app.post("/api/accounts", async (req, res) => {
-  try {
-    const { username, email, password, proxy, dailyLimit, notes } = req.body;
-
-    const accountData = {
-      username,
-      email,
-      passwordHash: password, // In production, hash this password
-      proxyId: proxy ? parseInt(proxy) : null,
-      isActive: true,
-    };
-
-    const account = await AccountsService.addAccount(accountData);
-    res.json({
-      status: "success",
-      message: "Account created successfully",
-      account,
-    });
-  } catch (error) {
-    console.error("Error creating account:", error);
-    res.status(500).json({ status: "error", message: error.message });
-  }
-});
-
-// Login to Instagram and save cookies
-app.post("/api/accounts/login", async (req, res) => {
-  try {
-    const { username, password } = req.body;
-
-    if (!username || !password) {
-      return res.status(400).json({
-        status: "error",
-        message: "Username and password are required",
-      });
-    }
-
-    // Check if account exists in database
-    const account = await AccountsService.getAccountByUsername(username);
-    if (!account) {
-      return res.status(404).json({
-        status: "error",
-        message: "Account not found. Please add the account first.",
-      });
-    }
-
-    console.log(`Starting Instagram login process for ${username}...`);
-
-    // Import and run the login function
-    const { loginAndSaveCookies } = require("./login");
-    const result = await loginAndSaveCookies(username, password);
-
-    if (result.success) {
-      res.json({
-        status: "success",
-        message: "Successfully logged in and saved cookies to Instagram",
-      });
-    } else {
-      res.status(500).json({
-        status: "error",
-        message: "Login failed - please check your credentials",
-      });
-    }
-  } catch (error) {
-    console.error("Error during Instagram login:", error);
-    res.status(500).json({
-      status: "error",
-      message: error.message || "Login process failed",
-    });
-  }
-});
-
-app.put("/api/accounts/:username", async (req, res) => {
-  try {
-    const { username: originalUsername } = req.params;
-    const updates = req.body;
-
-    // Find the original account
-    const account =
-      AccountsService.getAccountByUsernameOrEmail(originalUsername);
-    if (!account) {
-      return res
-        .status(404)
-        .json({ status: "error", message: "Account not found" });
-    }
-
-    // Prepare updated account data, allowing username change
-    const updatedAccountData = {
-      ...account,
-      username: updates.username || account.username,
-      email: updates.email !== undefined ? updates.email : account.email,
-      passwordHash:
-        updates.password !== undefined
-          ? updates.password
-          : account.passwordHash,
-      proxyId: updates.proxy ? parseInt(updates.proxy) : account.proxyId,
-      isActive:
-        updates.isActive !== undefined ? updates.isActive : account.isActive,
-    };
-
-    // Remove the old account if username is changing
-    if (updatedAccountData.username !== account.username) {
-      AccountsService.deleteAccount(account.username);
-    }
-
-    // Upsert the updated account
-    const updatedAccount = AccountsService.upsertAccount(updatedAccountData);
-    res.json({
-      status: "success",
-      message: "Account updated successfully",
-      account: updatedAccount,
-    });
-  } catch (error) {
-    console.error("Error updating account:", error);
-    res.status(500).json({ status: "error", message: error.message });
-  }
-});
-
-app.delete("/api/accounts/:username", async (req, res) => {
-  try {
-    const { username } = req.params;
-    const success = AccountsService.deleteAccount(username);
-    if (success) {
-      res.json({ status: "success", message: "Account deleted successfully" });
-    } else {
-      res.status(404).json({ status: "error", message: "Account not found" });
-    }
-  } catch (error) {
-    console.error("Error deleting account:", error);
-    res.status(500).json({ status: "error", message: error.message });
-  }
-});
-
-// Additional endpoint to delete by account ID (for frontend compatibility)
-app.delete("/api/accounts/id/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const accountId = parseInt(id);
-
-    // Get all accounts to find the one with matching ID
-    const accounts = await AccountsService.getAccounts();
-    const accountToDelete = accounts.find(
-      (account) => account.id === accountId
-    );
-
-    if (!accountToDelete) {
-      return res
-        .status(404)
-        .json({ status: "error", message: "Account not found" });
-    }
-
-    const success = AccountsService.deleteAccount(accountToDelete.username);
-    if (success) {
-      res.json({ status: "success", message: "Account deleted successfully" });
-    } else {
-      res.status(404).json({ status: "error", message: "Account not found" });
-    }
-  } catch (error) {
-    console.error("Error deleting account:", error);
-    res.status(500).json({ status: "error", message: error.message });
-  }
-});
+// Accounts CRUD → routes/accounts.js
 
 // Scheduled Jobs endpoints
 app.get("/api/scheduled-jobs", async (req, res) => {
@@ -714,388 +520,19 @@ app.get("/api/scheduled-jobs", async (req, res) => {
   }
 });
 
-app.post("/api/scrape/accounts", async (req, res) => {
-  const { postUrl, igUsername } = req.body;
-  console.log("Starting scrape for account URL:", postUrl);
-  console.log("Using Instagram account:", igUsername);
+// Scrape routes → routes/scrape.js
 
-  try {
-    if (!postUrl || typeof postUrl !== "string") {
-      throw new Error("Missing or invalid profile URL");
-    }
+// Leads + Targets routes → routes/targets.js
 
-    if (!igUsername || typeof igUsername !== "string") {
-      throw new Error("Missing Instagram username for authentication");
-    }
+// CRM routes → routes/crm.js
 
-    // Extract username from URL for validation
-    const usernameMatch = postUrl.match(/instagram\.com\/([^\/\?]+)/);
-    if (!usernameMatch || !usernameMatch[1]) {
-      throw new Error("Invalid Instagram profile URL");
-    }
+// Reports + Exports → routes/reports.js
 
-    const targetUsername = usernameMatch[1];
-    console.log(
-      `Scraping followers for: ${targetUsername} using account: ${igUsername}`
-    );
+// Leads + Targets routes → routes/targets.js
 
-    // Use the new follower scraper with authentication
-    const followers = await scrapeFollowers(postUrl, igUsername);
+// CRM routes → routes/crm.js
 
-    // Convert to leads format
-    const leads = followers.map((followerUsername) => ({
-      username: followerUsername,
-      profileUrl: `https://instagram.com/${followerUsername}`,
-      timestamp: new Date().toISOString(),
-    }));
-
-    // Store leads in database
-    let storedCount = 0;
-    for (const lead of leads) {
-      try {
-        await LeadsService.createLead({
-          username: lead.username,
-          profileUrl: lead.profileUrl,
-          source: "instagram_followers",
-          sourceUrl: postUrl,
-          scrapedAt: lead.timestamp,
-        });
-        storedCount++;
-      } catch (error) {
-        // Handle duplicate username constraint
-        if (error.code === "SQLITE_CONSTRAINT") {
-          console.log(`Lead ${lead.username} already exists, skipping`);
-        } else {
-          console.error(`Error storing lead ${lead.username}:`, error);
-        }
-      }
-    }
-
-    console.log(
-      `Processed ${storedCount} leads from ${targetUsername}'s followers`
-    );
-    res.json({
-      status: "success",
-      leads,
-      totalFound: followers.length,
-      totalStored: storedCount,
-      message: `Successfully scraped ${storedCount} followers from ${targetUsername} using account ${igUsername}`,
-    });
-  } catch (err) {
-    console.error("Error scraping leads:", err);
-    res.status(500).json({ status: "error", message: err.message });
-  }
-});
-
-// Endpoint to scrape comments from a post
-app.post("/api/scrape/posts", async (req, res) => {
-  try {
-    const { postUrl, igUsername } = req.body;
-    console.log("Starting scrape for URL:", postUrl);
-    console.log("Using account:", igUsername);
-
-    if (!igUsername) {
-      return res
-        .status(400)
-        .json({ error: "Instagram username is required for authentication" });
-    }
-
-    // Use your own Puppeteer scraper with authentication
-    const usernames = await scrapeProduct(postUrl, igUsername);
-    console.log("Scraped usernames:", usernames);
-
-    // Convert to leads format for frontend (don't store in database yet)
-    const leads = usernames.map((username) => ({
-      username,
-      profileUrl: `https://instagram.com/${username}`,
-      source: "instagram_post_comments",
-      sourceUrl: postUrl,
-      scrapedAt: new Date().toISOString(),
-      notes: "",
-    }));
-
-    // Return leads to frontend for temporary storage
-    res.json({
-      status: "success",
-      leads,
-      totalFound: usernames.length,
-      message: `Successfully scraped ${usernames.length} usernames from post comments`,
-    });
-  } catch (error) {
-    console.error("Error scraping leads:", error);
-    res.status(500).json({
-      status: "error",
-      message: error.message || "Failed to scrape leads",
-    });
-  }
-});
-// Endpoint to scrape usernames from a hashtag using Puppeteer
-app.post("/api/scrape/hashtags", async (req, res) => {
-  try {
-    const { postUrl, igUsername, maxPosts } = req.body;
-    console.log("Starting hashtag scrape for:", postUrl);
-    console.log("Using Instagram account:", igUsername);
-    console.log("Max posts:", maxPosts);
-
-    // Validate inputs
-    if (!postUrl || typeof postUrl !== "string") {
-      return res.status(400).json({
-        status: "error",
-        message: "Missing or invalid hashtag input",
-      });
-    }
-
-    // Use default account if none specified, or get first available account
-    let accountToUse = igUsername;
-    if (!accountToUse) {
-      const accounts = AccountsService.getAccounts();
-      if (accounts.length === 0) {
-        return res.status(400).json({
-          status: "error",
-          message:
-            "No Instagram accounts available. Please add an account first.",
-        });
-      }
-      accountToUse = accounts[0].username;
-      console.log("No account specified, using first available:", accountToUse);
-    }
-
-    // Extract hashtag from input (remove # if present)
-    const hashtag = postUrl.replace(/^#/, "").trim();
-
-    if (!hashtag) {
-      return res.status(400).json({
-        status: "error",
-        message: "Invalid hashtag input",
-      });
-    }
-
-    console.log(`Scraping hashtag: #${hashtag} using account: ${accountToUse}`);
-
-    // Use the new Puppeteer-based hashtag scraper
-    const usernames = await scrapeHashtag(hashtag, accountToUse, maxPosts);
-
-    // Convert to leads format
-    const leads = usernames.map((username) => ({
-      username: username,
-      profileUrl: `https://instagram.com/${username}`,
-      timestamp: new Date().toISOString(),
-    }));
-
-    // Store leads in database
-    let storedCount = 0;
-    for (const lead of leads) {
-      try {
-        const result = await LeadsService.createLeadOrIgnore({
-          username: lead.username,
-          profileUrl: lead.profileUrl,
-          source: "instagram_hashtag",
-          sourceUrl: `#${hashtag}`,
-          scrapedAt: lead.timestamp,
-        });
-
-        if (result.inserted) {
-          storedCount++;
-        } else {
-          console.log(`Lead ${lead.username} already exists, skipping`);
-        }
-      } catch (error) {
-        console.error(`Error storing lead ${lead.username}:`, error);
-      }
-    }
-
-    console.log(`Processed ${storedCount} leads from hashtag #${hashtag}`);
-    res.json({
-      status: "success",
-      leads,
-      totalFound: usernames.length,
-      totalStored: storedCount,
-      message: `Successfully scraped ${storedCount} usernames from hashtag #${hashtag}`,
-    });
-  } catch (error) {
-    console.error("Error scraping hashtag:", error);
-    res.status(500).json({
-      status: "error",
-      message: error.message || "Failed to scrape hashtag",
-    });
-  }
-});
-// Endpoint to scrape usernames from keyword search using Puppeteer
-app.post("/api/scrape/keywords", async (req, res) => {
-  try {
-    const { postUrl: keywords, igUsername, maxPosts } = req.body;
-    console.log("Starting keyword search for:", keywords);
-    console.log("Using Instagram account:", igUsername);
-    console.log("Max posts:", maxPosts);
-
-    // Validate inputs
-    if (!keywords || typeof keywords !== "string") {
-      return res.status(400).json({
-        status: "error",
-        message: "Missing or invalid keywords input",
-      });
-    }
-
-    // Use default account if none specified, or get first available account
-    let accountToUse = igUsername;
-    if (!accountToUse) {
-      const accounts = AccountsService.getAccounts();
-      if (accounts.length === 0) {
-        return res.status(400).json({
-          status: "error",
-          message:
-            "No Instagram accounts available. Please add an account first.",
-        });
-      }
-      accountToUse = accounts[0].username;
-      console.log("No account specified, using first available:", accountToUse);
-    }
-
-    console.log(
-      `Searching for keywords: "${keywords}" using account: ${accountToUse}`
-    );
-
-    // Use the new Puppeteer-based keyword scraper
-    const usernames = await scrapeKeyword(keywords, accountToUse, maxPosts);
-
-    // Convert to leads format
-    const leads = usernames.map((username) => ({
-      username: username,
-      profileUrl: `https://instagram.com/${username}`,
-      timestamp: new Date().toISOString(),
-    }));
-
-    // Store leads in database
-    let storedCount = 0;
-    for (const lead of leads) {
-      try {
-        await LeadsService.createLead({
-          username: lead.username,
-          profileUrl: lead.profileUrl,
-          source: "instagram_keyword_search",
-          sourceUrl: keywords,
-          scrapedAt: lead.timestamp,
-          notes: `Found via keyword search: ${keywords}`,
-        });
-        storedCount++;
-      } catch (error) {
-        // Handle duplicate username constraint
-        if (error.code === "SQLITE_CONSTRAINT") {
-          console.log(`Lead ${lead.username} already exists, skipping`);
-        } else {
-          console.error(`Error storing lead ${lead.username}:`, error);
-        }
-      }
-    }
-
-    console.log(
-      `Processed ${storedCount} leads from keyword search: "${keywords}"`
-    );
-    res.json({
-      status: "success",
-      leads,
-      totalFound: usernames.length,
-      totalStored: storedCount,
-      message: `Successfully found ${storedCount} usernames for keywords: "${keywords}"`,
-    });
-  } catch (error) {
-    console.error("Error searching keywords:", error);
-    res.status(500).json({
-      status: "error",
-      message: error.message,
-    });
-  }
-});
-
-// Batch leads endpoints
-app.post("/api/leads/batch", async (req, res) => {
-  try {
-    const { leads } = req.body;
-
-    if (!leads || !Array.isArray(leads)) {
-      return res.status(400).json({
-        status: "error",
-        message: "Invalid leads data. Expected an array of leads.",
-      });
-    }
-
-    let savedCount = 0;
-    const errors = [];
-
-    // Process each lead
-    for (const lead of leads) {
-      try {
-        const {
-          username,
-          source = "manual",
-          status = "new",
-          isTarget = true,
-        } = lead;
-
-        if (!username) {
-          errors.push("Username is required for each lead");
-          continue;
-        }
-
-        // Add to leads table (or update if exists)
-        const result = await LeadsService.createLeadOrIgnore({
-          username: username.replace("@", ""),
-          source,
-          status,
-          is_target: isTarget ? 1 : 0,
-        });
-
-        if (result.inserted) {
-          savedCount++;
-        } else {
-          console.log(`Lead ${username} already exists, updating status`);
-          const existingLead = await LeadsService.getLeadByUsername(
-            username.replace("@", "")
-          );
-          if (existingLead) {
-            await LeadsService.updateLead(existingLead.id, {
-              is_target: isTarget ? 1 : 0,
-              status: status || existingLead.status,
-            });
-          }
-        }
-
-        // If it's a target, also add to targets table
-        if (isTarget) {
-          await TargetsService.addTarget(username.replace("@", ""));
-        }
-      } catch (leadError) {
-        console.error(`Error processing lead ${lead.username}:`, leadError);
-        errors.push(`Failed to save ${lead.username}: ${leadError.message}`);
-      }
-    }
-
-    res.json({
-      status: "success",
-      savedCount,
-      totalRequested: leads.length,
-      errors: errors.length > 0 ? errors : undefined,
-      message: `Successfully saved ${savedCount} out of ${leads.length} leads`,
-    });
-  } catch (error) {
-    console.error("Error in batch leads endpoint:", error);
-    res.status(500).json({
-      status: "error",
-      message: error.message || "Failed to process batch leads",
-    });
-  }
-});
-
-// Target usernames endpoints - Use SQLite targets service
-app.get("/api/targets", async (req, res) => {
-  try {
-    const targets = await TargetsService.loadTargets();
-    res.json({ status: "success", targets });
-  } catch (err) {
-    console.error("Error fetching targets:", err);
-    res.status(500).json({ status: "error", message: err.message });
-  }
-});
+// Reports + Exports → routes/reports.js
 
 // Start the server
 const server = app.listen(PORT, () => {

@@ -1,86 +1,62 @@
 const express = require("express");
 const router = express.Router();
-
-// --- Mock Data ---
-const mockTeamMembers = [
-  {
-    id: 1,
-    name: "Admin User",
-    email: "admin@example.com",
-    role: "Admin",
-    avatar: "/avatars/avatar1.svg",
-  },
-  {
-    id: 2,
-    name: "Manager User",
-    email: "manager@example.com",
-    role: "Manager",
-    avatar: "/avatars/avatar2.svg",
-  },
-  {
-    id: 3,
-    name: "Member User",
-    email: "member@example.com",
-    role: "Member",
-    avatar: "/avatars/avatar3.svg",
-  },
-];
-
-const mockRoles = [
-  { id: "admin", name: "Admin", description: "Full access to all features." },
-  {
-    id: "manager",
-    name: "Manager",
-    description: "Can manage campaigns and view reports.",
-  },
-  {
-    id: "member",
-    name: "Member",
-    description: "Can view campaigns and basic data.",
-  },
-];
-
-const mockSharedTemplates = [
-  { id: 1, name: "Welcome Message", content: "Hey {{username}}, welcome!" },
-  { id: 2, name: "Follow-Up", content: "Just checking in, {{username}}." },
-];
-
-const mockWorkspaces = [{ id: 1, name: "Default Workspace" }];
-
-const mockActivity = [
-  {
-    id: 1,
-    user: "Admin User",
-    action: "Invited manager@example.com",
-    timestamp: "2023-10-27T10:00:00Z",
-  },
-];
+const TeamService = require("../database/team");
 
 // --- GET Endpoints ---
 
-router.get("/members", (req, res) => {
-  res.json({ members: mockTeamMembers });
+router.get("/members", async (req, res) => {
+  try {
+    const members = await TeamService.getMembers();
+    res.json({ members });
+  } catch (err) {
+    console.error("Error getting team members:", err);
+    res.status(500).json({ message: err.message });
+  }
 });
 
-router.get("/roles", (req, res) => {
-  res.json({ roles: mockRoles });
+router.get("/roles", async (req, res) => {
+  try {
+    const roles = await TeamService.getRoles();
+    res.json({ roles });
+  } catch (err) {
+    console.error("Error getting roles:", err);
+    res.status(500).json({ message: err.message });
+  }
 });
 
-router.get("/templates", (req, res) => {
-  res.json({ templates: mockSharedTemplates });
+router.get("/templates", async (req, res) => {
+  try {
+    const templates = await TeamService.getTemplates();
+    res.json({ templates });
+  } catch (err) {
+    console.error("Error getting templates:", err);
+    res.status(500).json({ message: err.message });
+  }
 });
 
-router.get("/workspaces", (req, res) => {
-  res.json({ workspaces: mockWorkspaces });
+router.get("/workspaces", async (req, res) => {
+  try {
+    const workspaces = await TeamService.getWorkspaces();
+    res.json({ workspaces });
+  } catch (err) {
+    console.error("Error getting workspaces:", err);
+    res.status(500).json({ message: err.message });
+  }
 });
 
-router.get("/activity", (req, res) => {
-  res.json({ activities: mockActivity });
+router.get("/activity", async (req, res) => {
+  try {
+    const activities = await TeamService.getActivity();
+    res.json({ activities });
+  } catch (err) {
+    console.error("Error getting activity:", err);
+    res.status(500).json({ message: err.message });
+  }
 });
 
-// --- POST/PUT Endpoints ---
+// --- POST/PUT/DELETE Endpoints ---
 
-router.post("/invite", (req, res) => {
+router.post("/invite", async (req, res) => {
   if (!req.body || typeof req.body !== "object") {
     return res.status(400).json({ message: "Missing request body." });
   }
@@ -88,11 +64,70 @@ router.post("/invite", (req, res) => {
   if (!email || !role) {
     return res.status(400).json({ message: "Email and role are required." });
   }
-  console.log(`Inviting ${email} as ${role}`);
-  res.status(200).json({
-    status: "success",
-    message: `Invitation sent to ${email}.`,
-  });
+  try {
+    const member = await TeamService.addMember({ email, role });
+    await TeamService.logActivity("System", `Invited ${email} as ${role}`);
+    res.status(200).json({
+      status: "success",
+      message: `Invitation sent to ${email}.`,
+      member,
+    });
+  } catch (err) {
+    if (err.message && err.message.includes("UNIQUE constraint")) {
+      return res
+        .status(409)
+        .json({ message: "Member with that email already exists." });
+    }
+    console.error("Error inviting member:", err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.delete("/members/:id", async (req, res) => {
+  try {
+    await TeamService.removeMember(parseInt(req.params.id));
+    res.json({ status: "success" });
+  } catch (err) {
+    console.error("Error removing member:", err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.patch("/members/:id/role", async (req, res) => {
+  try {
+    const { role } = req.body;
+    if (!role) return res.status(400).json({ message: "Role is required." });
+    await TeamService.updateMemberRole(parseInt(req.params.id), role);
+    res.json({ status: "success" });
+  } catch (err) {
+    console.error("Error updating member role:", err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.post("/templates", async (req, res) => {
+  try {
+    const { name, content } = req.body;
+    if (!name || !content)
+      return res
+        .status(400)
+        .json({ message: "Name and content are required." });
+    const template = await TeamService.addTemplate({ name, content });
+    res.json({ status: "success", template });
+  } catch (err) {
+    console.error("Error adding template:", err);
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.delete("/templates/:id", async (req, res) => {
+  try {
+    await TeamService.deleteTemplate(parseInt(req.params.id));
+    res.json({ status: "success" });
+  } catch (err) {
+    console.error("Error deleting template:", err);
+    res.status(500).json({ message: err.message });
+  }
 });
 
 module.exports = router;

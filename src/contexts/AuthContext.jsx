@@ -29,11 +29,12 @@ export function AuthProvider({ children }) {
     (async () => {
       const api = getAuthAPI();
 
-      // When running outside Electron (e.g. vite dev server in browser),
-      // skip auth entirely so development isn't blocked.
-      if (!api) {
+      // Dev bypass ONLY when there is genuinely no Electron context at all
+      // (i.e. opened in a plain browser during development).
+      // If window.electronAPI exists but auth is missing, that's a bug — lock the app.
+      if (!window.electronAPI && !api) {
         console.warn(
-          "[Auth] No electronAPI.auth detected — bypassing auth for dev mode",
+          "[Auth] No Electron context detected — bypassing auth for browser dev mode",
         );
         setAuthState("authenticated");
         setUser({
@@ -42,6 +43,15 @@ export function AuthProvider({ children }) {
           plan: "pro",
           subscriptionStatus: "active",
         });
+        return;
+      }
+
+      if (!api) {
+        // Electron is present but auth IPC is missing — something went wrong
+        setAuthError(
+          "License verification unavailable. Please reinstall the app.",
+        );
+        setAuthState("login");
         return;
       }
 

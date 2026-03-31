@@ -75,18 +75,9 @@ function createWindow() {
       mainWindow.loadURL("http://localhost:5173"); // Vite dev server
       mainWindow.webContents.openDevTools({ mode: "detach" });
     } else {
-      // In packaged apps, the structure is different
-      // The electron folder and dist folder are siblings in the app.asar or resources
-      let indexPath;
-      if (app.isPackaged) {
-        // When packaged, look for dist relative to the app resources
-        indexPath = normalize(
-          path.join(process.resourcesPath, "dist", "index.html"),
-        );
-      } else {
-        // Development mode
-        indexPath = normalize(path.join(__dirname, "../dist/index.html"));
-      }
+      // In packaged apps, dist/ and electron/ are siblings inside app.asar.
+      // __dirname = resources/app.asar/electron  →  ../dist/index.html is correct.
+      let indexPath = normalize(path.join(__dirname, "../dist/index.html"));
 
       log("Loading renderer from file:", indexPath);
       log("App is packaged:", app.isPackaged);
@@ -101,7 +92,15 @@ function createWindow() {
           logError("Index file not found at:", indexPath);
           // Try alternative paths
           const altPaths = [
-            normalize(path.join(__dirname, "../dist/index.html")),
+            normalize(
+              path.join(
+                process.resourcesPath,
+                "app.asar",
+                "dist",
+                "index.html",
+              ),
+            ),
+            normalize(path.join(process.resourcesPath, "dist", "index.html")),
             normalize(path.join(__dirname, "../../dist/index.html")),
             normalize(path.join(__dirname, "dist/index.html")),
           ];
@@ -153,12 +152,13 @@ function createWindow() {
 
     mainWindow.webContents.on("did-finish-load", () => {
       log("Window finished loading successfully");
+      // Always open DevTools so we can debug — remove this line before shipping to customers
+      mainWindow.webContents.openDevTools({ mode: "detach" });
     });
 
     // Enable dev tools in production for debugging this issue
     if (!isDev) {
-      mainWindow.webContents.openDevTools({ mode: "detach" });
-      log("Opening dev tools for debugging");
+      // DevTools opened in did-finish-load above
     }
 
     // Start the backend server

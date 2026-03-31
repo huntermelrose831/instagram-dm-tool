@@ -52,13 +52,16 @@ const SELECTORS = {
   ],
 
   SEARCH_RESULTS: [
+    // Confirmed working selector for DM compose search results
     'input[name="ContactSearchResultCheckbox"]',
     'input[aria-label="Radio selection"]',
-    'input[type="checkbox"][aria-label*="selection"]',
-    'input[type="checkbox"][tabindex="-1"]',
-    'input[aria-label*="Radio selection"][type="checkbox"]',
+    // Current Instagram DM compose search result rows
+    'div[role="dialog"] div[role="button"]',
+    'div[role="listbox"] div[role="option"]',
+    'div[role="option"]',
     'div[role="dialog"] div[role="none"] div[role="button"]',
     'div[role="dialog"] div[aria-label*="suggested"] div[role="button"]',
+    'input[type="checkbox"][tabindex="-1"]',
   ],
 
   CHAT_BUTTON: [
@@ -90,7 +93,7 @@ const SELECTORS = {
 
   // Authentication check selectors
   LOGIN_FORM: [
-    'form#loginForm',
+    "form#loginForm",
     'input[name="username"]',
     'input[aria-label*="username"]',
     'input[placeholder*="username"]',
@@ -116,18 +119,18 @@ const SELECTORS = {
  */
 async function findWorkingSelector(page, selectors, timeout = 5000) {
   if (!page || page.isClosed()) {
-    throw new Error('Page is closed or detached');
+    throw new Error("Page is closed or detached");
   }
 
   const selectorArray = Array.isArray(selectors) ? selectors : [selectors];
   const timeoutPerSelector = Math.max(1000, timeout / selectorArray.length);
-  
+
   for (const selector of selectorArray) {
     try {
       console.log(`Trying selector: ${selector}`);
-      const element = await page.waitForSelector(selector, { 
+      const element = await page.waitForSelector(selector, {
         timeout: timeoutPerSelector,
-        visible: true 
+        visible: true,
       });
       if (element) {
         console.log(`✓ Found element with selector: ${selector}`);
@@ -138,7 +141,7 @@ async function findWorkingSelector(page, selectors, timeout = 5000) {
       continue;
     }
   }
-  
+
   throw new Error(`None of the selectors found: ${selectorArray.join(", ")}`);
 }
 
@@ -150,16 +153,16 @@ async function findWorkingSelector(page, selectors, timeout = 5000) {
  */
 async function isElementInteractable(page, element) {
   if (!element) return false;
-  
+
   try {
     const isVisible = await element.isIntersectingViewport();
-    const isEnabled = await page.evaluate(el => {
+    const isEnabled = await page.evaluate((el) => {
       return !el.disabled && el.offsetParent !== null;
     }, element);
-    
+
     return isVisible && isEnabled;
   } catch (error) {
-    console.warn('Error checking element interactability:', error.message);
+    console.warn("Error checking element interactability:", error.message);
     return false;
   }
 }

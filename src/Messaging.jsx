@@ -254,8 +254,6 @@ const Messaging = () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-api-key":
-            "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
         },
         body: JSON.stringify(requestPayload),
       });
@@ -315,8 +313,6 @@ const Messaging = () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-api-key":
-            "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
         },
         body: JSON.stringify({
           email: selectedAccount,

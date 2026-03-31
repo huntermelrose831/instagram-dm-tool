@@ -102,7 +102,7 @@ const Accounts = () => {
   const fetchSafetyAccounts = async () => {
     try {
       const response = await fetch(
-        `${API_BASE_URL}/api/account-safety/accounts`
+        `${API_BASE_URL}/api/account-safety/accounts`,
       );
       if (response.ok) {
         const data = await response.json();
@@ -121,7 +121,7 @@ const Accounts = () => {
   const fetchProxies = async () => {
     try {
       const response = await fetch(
-        `${API_BASE_URL}/api/account-safety/proxies`
+        `${API_BASE_URL}/api/account-safety/proxies`,
       );
       if (response.ok) {
         const data = await response.json();
@@ -135,7 +135,7 @@ const Accounts = () => {
   const fetchRateLimits = async () => {
     try {
       const response = await fetch(
-        `${API_BASE_URL}/api/account-safety/rate-limits`
+        `${API_BASE_URL}/api/account-safety/rate-limits`,
       );
       if (response.ok) {
         const data = await response.json();
@@ -154,11 +154,9 @@ const Accounts = () => {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "x-api-key":
-              "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
           },
           body: JSON.stringify(newProxy),
-        }
+        },
       );
 
       if (response.ok) {
@@ -185,11 +183,9 @@ const Accounts = () => {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "x-api-key":
-              "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
           },
           body: JSON.stringify(newRateLimit),
-        }
+        },
       );
 
       if (response.ok) {
@@ -219,7 +215,7 @@ const Accounts = () => {
         `${API_BASE_URL}/api/account-safety/proxies/${proxyId}`,
         {
           method: "DELETE",
-        }
+        },
       );
       if (response.ok) {
         fetchProxies();
@@ -232,7 +228,7 @@ const Accounts = () => {
   const performHealthCheck = async (accountId) => {
     try {
       const response = await fetch(
-        `${API_BASE_URL}/api/account-safety/health-check/${accountId}`
+        `${API_BASE_URL}/api/account-safety/health-check/${accountId}`,
       );
       if (response.ok) {
         const data = await response.json();
@@ -254,8 +250,6 @@ const Accounts = () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-api-key":
-            "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
         },
         body: JSON.stringify(newAccount),
       });
@@ -272,31 +266,29 @@ const Accounts = () => {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
-                "x-api-key":
-                  "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
               },
               body: JSON.stringify({
                 username: newAccount.username,
                 password: newAccount.password,
               }),
-            }
+            },
           );
 
           const loginResult = await loginResponse.json();
 
           if (loginResponse.ok) {
             alert(
-              "✅ Account added successfully and logged in to Instagram! Ready to send DMs."
+              "✅ Account added successfully and logged in to Instagram! Ready to send DMs.",
             );
           } else {
             alert(
-              `✅ Account added successfully, but Instagram login failed: ${loginResult.message}\nYou can try logging in again later.`
+              `✅ Account added successfully, but Instagram login failed: ${loginResult.message}\nYou can try logging in again later.`,
             );
           }
         } catch (loginError) {
           console.error("Error during Instagram login:", loginError);
           alert(
-            "✅ Account added successfully, but Instagram login failed. You can try logging in again later."
+            "✅ Account added successfully, but Instagram login failed. You can try logging in again later.",
           );
         }
 
@@ -310,7 +302,8 @@ const Accounts = () => {
         });
         setShowAddForm(false);
       } else {
-        alert("Failed to add account. Please try again.");
+        const errorData = await response.json().catch(() => ({}));
+        alert(errorData.message || "Failed to add account. Please try again.");
       }
     } catch (error) {
       console.error("Error adding account:", error);
@@ -332,10 +325,8 @@ const Accounts = () => {
           method: "DELETE",
           headers: {
             "Content-Type": "application/json",
-            "x-api-key":
-              "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
           },
-        }
+        },
       );
 
       if (response.ok) {
@@ -360,19 +351,17 @@ const Accounts = () => {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
-            "x-api-key":
-              "86b3296b98b31fb349420dd90838470d06b0bc3b4cf2c9ec41118316cba1756d",
           },
           body: JSON.stringify(updates),
-        }
+        },
       );
 
       if (response.ok) {
         const updatedAccount = await response.json();
         setAccounts(
           accounts.map((account) =>
-            account.id === accountId ? updatedAccount : account
-          )
+            account.id === accountId ? updatedAccount : account,
+          ),
         );
         setEditingAccount(null);
       }
@@ -643,7 +632,7 @@ const Accounts = () => {
                       onChange={(e) =>
                         handleNewAccountChange(
                           "dailyLimit",
-                          parseInt(e.target.value)
+                          parseInt(e.target.value),
                         )
                       }
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-green-500 focus:border-green-500"
@@ -789,7 +778,7 @@ const Accounts = () => {
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                             {account.lastActivity
                               ? new Date(
-                                  account.lastActivity
+                                  account.lastActivity,
                                 ).toLocaleDateString()
                               : "Never"}
                           </td>
@@ -968,7 +957,7 @@ const Accounts = () => {
                     <p className="text-2xl font-bold text-red-600">
                       {
                         safetyAccounts.filter(
-                          (acc) => acc.status === "restricted"
+                          (acc) => acc.status === "restricted",
                         ).length
                       }
                     </p>
@@ -1108,7 +1097,7 @@ const Accounts = () => {
                               onClick={() =>
                                 toggleAccountRotation(
                                   account.id,
-                                  !account.rotationEnabled
+                                  !account.rotationEnabled,
                                 )
                               }
                               className={`${account.rotationEnabled ? "text-green-600" : "text-gray-400"} hover:text-green-900`}
@@ -1383,7 +1372,7 @@ const Accounts = () => {
                       onChange={(e) =>
                         handleNewRateLimitChange(
                           "dmPerHour",
-                          parseInt(e.target.value)
+                          parseInt(e.target.value),
                         )
                       }
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
@@ -1401,7 +1390,7 @@ const Accounts = () => {
                       onChange={(e) =>
                         handleNewRateLimitChange(
                           "dmPerDay",
-                          parseInt(e.target.value)
+                          parseInt(e.target.value),
                         )
                       }
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
@@ -1422,7 +1411,7 @@ const Accounts = () => {
                       onChange={(e) =>
                         handleNewRateLimitChange(
                           "followPerHour",
-                          parseInt(e.target.value)
+                          parseInt(e.target.value),
                         )
                       }
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
@@ -1440,7 +1429,7 @@ const Accounts = () => {
                       onChange={(e) =>
                         handleNewRateLimitChange(
                           "followPerDay",
-                          parseInt(e.target.value)
+                          parseInt(e.target.value),
                         )
                       }
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"

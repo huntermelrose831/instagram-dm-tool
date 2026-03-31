@@ -1,10 +1,10 @@
-# Instagram DM Tool - Distribution Guide
+# TurboDM - Distribution Guide
 
 ## Supported Platforms
 
 Windows and Linux only. macOS is not supported.
 
-Transform your Instagram marketing with our powerful automation tool that helps you:
+TurboDM is a standalone desktop application for Instagram outreach automation that helps you:
 
 - **Generate Leads**: Scrape followers, hashtags, and keywords
 - **Send DMs**: Automated direct messaging with rate limiting
@@ -18,10 +18,10 @@ Transform your Instagram marketing with our powerful automation tool that helps 
 
 ### Windows
 
-1. Download `Instagram DM Tool Setup 1.0.0.exe`
-2. Run the installer as administrator
+1. Download `TurboDM Setup 1.0.0.exe`
+2. Run the installer (administrator not required)
 3. Follow the setup wizard
-4. Launch from Start Menu or Desktop
+4. Launch from Start Menu or Desktop shortcut
 
 ### macOS
 
@@ -29,15 +29,15 @@ Transform your Instagram marketing with our powerful automation tool that helps 
 
 ### Linux
 
-1. Download `Instagram DM Tool-1.0.0.AppImage`
-2. Make it executable: `chmod +x Instagram\ DM\ Tool-1.0.0.AppImage`
-3. Double-click to run or use `./Instagram\ DM\ Tool-1.0.0.AppImage`
-4. For system integration: `./Instagram\ DM\ Tool-1.0.0.AppImage --appimage-install`
+1. Download `TurboDM-1.0.0.AppImage`
+2. Make it executable: `chmod +x TurboDM-1.0.0.AppImage`
+3. Double-click to run or use `./TurboDM-1.0.0.AppImage`
+4. For system integration: `./TurboDM-1.0.0.AppImage --appimage-install`
 
 **Alternative Linux (Debian/Ubuntu):**
 
-1. Download `instagram-dm-tool_1.0.0_amd64.deb`
-2. Install: `sudo dpkg -i instagram-dm-tool_1.0.0_amd64.deb`
+1. Download `turbodm_1.0.0_amd64.deb`
+2. Install: `sudo dpkg -i turbodm_1.0.0_amd64.deb`
 3. Launch from Applications menu
 
 ---
@@ -46,28 +46,28 @@ Transform your Instagram marketing with our powerful automation tool that helps 
 
 ### 1. First Launch
 
-- The app will create a data folder in your user directory
-- All your accounts and data are stored locally and securely
+- TurboDM creates a local data folder in your user directory
+- All accounts, leads, and message history are stored locally — nothing is sent to any cloud service
 
 ### 2. Add Instagram Account
 
-- Go to "Accounts" tab
-- Click "Add Account"
+- Go to **Accounts** tab
+- Click **Add Account**
 - Enter your Instagram credentials
-- The app will securely save your login session
+- The app saves your login session locally
 
 ### 3. Start Lead Generation
 
-- Use "Targets" tab to scrape followers, hashtags, or keywords
-- Review and select leads in the "Leads" tab
+- Use the **Leads** tab to scrape followers, hashtags, or keywords
+- Review and select users from the results
 - Add selected leads to your target list
 
 ### 4. Send Messages
 
-- Go to "Messaging" tab
-- Select your target audience
-- Craft your message or use variations
-- Schedule or send immediately
+- Go to the **Messaging** tab
+- Select your target list and account
+- Write your message or use variations for A/B testing
+- Send immediately or schedule for later
 
 ---
 
@@ -96,8 +96,8 @@ Transform your Instagram marketing with our powerful automation tool that helps 
 
 ### Analytics & Reporting
 
-- **Campaign Tracking**: Monitor message delivery and responses
-- **Lead Analytics**: Track conversion rates and engagement
+- **Campaign Tracking**: Monitor message delivery and response rates
+- **Lead Pipeline**: Track users from scraped → contacted → replied → converted
 - **Export Data**: Download reports in CSV format
 - **Performance Metrics**: Detailed statistics on all activities
 
@@ -106,9 +106,8 @@ Transform your Instagram marketing with our powerful automation tool that helps 
 ## Safety Features
 
 - **Rate Limiting**: Automatic delays to mimic human behavior
-- **Account Protection**: Built-in safeguards against bans
-- **Data Encryption**: Secure storage of sensitive information
-- **Compliance Mode**: Respects Instagram's terms of service
+- **Account Protection**: Built-in safeguards to reduce ban risk
+- **Local Storage Only**: All data stays on your machine — no cloud sync
 
 ---
 
@@ -132,34 +131,20 @@ Transform your Instagram marketing with our powerful automation tool that helps 
 
 ---
 
-## Support
+## Troubleshooting
 
-### Getting Help
-
-- **Documentation**: Comprehensive guides included
-- **Email Support**: [your.email@example.com]
-- **Updates**: Automatic update notifications
-- **Community**: Join our user community for tips and tricks
-
-### Troubleshooting
-
-- Check firewall settings if connection issues occur
-- Ensure Instagram accounts have 2FA disabled for automation
-- Restart the app if you encounter any issues
-- Contact support for account-specific problems
+- **Login fails**: Ensure 2FA is disabled on the Instagram account, or use a saved session cookie
+- **App won’t open (Linux)**: Run `chmod +x TurboDM-*.AppImage` before launching
+- **Puppeteer/Chrome crash**: Ensure at least 4 GB RAM is free; close other Chrome windows
+- **Blank screen on launch**: Wait ~10 seconds for the backend to start, then reload
 
 ---
 
 ## License
 
-This software is licensed for commercial use. Each license permits installation on one computer. For multiple installations or team licenses, contact sales.
+This software is licensed for commercial use. Each license permits installation on one computer.
 
-### Terms of Use
-
-- Use responsibly and comply with Instagram's terms of service
-- Do not use for spam or malicious activities
-- Respect user privacy and consent
-- Follow applicable laws and regulations
+Use responsibly and in compliance with Instagram’s Terms of Service. Do not use for spam or unsolicited bulk messaging.
 
 ---
 
@@ -167,10 +152,6 @@ This software is licensed for commercial use. Each license permits installation 
 
 1. **Download** the installer for your operating system (Windows or Linux)
 2. **Install** following the instructions above
-3. **Launch** the application
+3. **Launch** TurboDM
 4. **Add** your first Instagram account
-5. **Start** generating leads and growing your business!
-
----
-
-_Instagram DM Tool v1.0.0 - Professional Instagram Marketing Automation_
+5. **Start** generating leads and growing your outreach

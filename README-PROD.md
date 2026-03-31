@@ -1,6 +1,6 @@
-# Instagram DM Tool - Production Notes
+# TurboDM - Production Notes
 
-This document covers production-relevant details for the Electron desktop application.
+This document covers production-relevant details for the TurboDM Electron desktop application.
 
 ## Supported Platforms
 
@@ -40,7 +40,7 @@ Output is placed in `dist-electron/`.
 
 ## Environment Configuration
 
-Create `backend/.env` before running or packaging:
+Create `backend/.env` before running or packaging (optional — all values have sensible defaults):
 
 | Variable    | Default        | Description               |
 | ----------- | -------------- | ------------------------- |
@@ -49,15 +49,11 @@ Create `backend/.env` before running or packaging:
 | `NODE_ENV`  | `production`   | Environment               |
 | `LOG_LEVEL` | `warn`         | Winston log level         |
 
-In the packaged Electron app, the backend process runs as a child process of the main Electron process. The `DATA_DIR` defaults to a directory inside the user's app data folder so data persists across updates.
+The backend runs as a child process of the Electron main process. `DATA_DIR` defaults to the user's app data folder so data persists across updates.
 
 ## Security
 
-- HTTP headers hardened via Helmet
-- All API inputs validated with Joi and sanitized with sanitize-html
-- Express rate limiting on all routes
-- Additional rate limiting on unknown/unmatched routes to slow scanners
-- Winston access logs written to the OS temp directory
+This is a local desktop application — the Express backend only listens on localhost and is never exposed to the network. Input validation is handled with Joi and sanitize-html. Winston access logs are written to the OS temp directory.
 
 ## Database Maintenance
 
@@ -71,7 +67,7 @@ The backup script copies the SQLite database file to a timestamped file in the s
 
 ## Logs
 
-Logs are written to the OS temp directory under `instagram-dm-tool/logs/`:
+Logs are written to the OS temp directory under `turbodm/logs/`:
 
 - `main.log` — Electron main process log
 - `access.log` — HTTP access log (Morgan)

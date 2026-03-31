@@ -26,7 +26,7 @@ async function loginAndSaveCookies(username, password) {
 
     // Set a realistic user agent
     await page.setUserAgent(
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     );
 
     // Navigate to Instagram login
@@ -37,26 +37,26 @@ async function loginAndSaveCookies(username, password) {
     });
 
     // Wait for login form
-    await page.waitForSelector('input[name="username"]', { timeout: 30000 });
+    await page.waitForSelector('input[name="email"]', { timeout: 30000 });
     await delay(2000);
 
     // Clear any existing input and type credentials
     console.log("Entering credentials...");
-    await page.click('input[name="username"]');
+    await page.click('input[name="email"]');
     await page.keyboard.down("Control");
     await page.keyboard.press("a");
     await page.keyboard.up("Control");
-    await page.type('input[name="username"]', username, { delay: 100 });
+    await page.type('input[name="email"]', username, { delay: 100 });
 
-    await page.click('input[name="password"]');
+    await page.click('input[name="pass"]');
     await page.keyboard.down("Control");
     await page.keyboard.press("a");
     await page.keyboard.up("Control");
-    await page.type('input[name="password"]', password, { delay: 100 });
+    await page.type('input[name="pass"]', password, { delay: 100 });
 
     // Click login button
     console.log("Clicking login button...");
-    await page.click('button[type="submit"]');
+    await page.click('#login_form > div > div.x1n2onr6.x1ja2u2z.x9f619.x78zum5.xdt5ytf.x2lah0s.x193iq5w.xz9dl7a > div > div.x9f619.x1n2onr6.x1ja2u2z.x78zum5.xdt5ytf.x2lah0s.x193iq5w.x6s0dn4.xz9dl7a.x1k70j0n.xzueoph.xzboxd6.x14l7nz5 > div > div');
 
     // Wait for navigation or error
     await delay(5000);
@@ -92,11 +92,11 @@ async function loginAndSaveCookies(username, password) {
 
           return homeElements || errorMessage || twoFactor || suspicious;
         },
-        { timeout: 30000 }
+        { timeout: 30000 },
       );
     } catch (waitError) {
       console.log(
-        "Timeout waiting for login result, checking current state..."
+        "Timeout waiting for login result, checking current state...",
       );
     }
 
@@ -144,7 +144,7 @@ async function loginAndSaveCookies(username, password) {
       }
 
       // Check if still on login page
-      const usernameInput = document.querySelector('input[name="username"]');
+      const usernameInput = document.querySelector('input[name="email"]');
       if (usernameInput) {
         return {
           success: false,
@@ -197,11 +197,11 @@ async function loginAndSaveCookies(username, password) {
     });
 
     console.log(
-      `Extracted ${importantCookies.length} important cookies out of ${cookies.length} total cookies`
+      `Extracted ${importantCookies.length} important cookies out of ${cookies.length} total cookies`,
     );
     console.log(
       "Important cookies found:",
-      importantCookies.map((c) => c.name)
+      importantCookies.map((c) => c.name),
     );
 
     // Verify we have the most critical cookie
@@ -230,7 +230,7 @@ async function loginAndSaveCookies(username, password) {
     // Add the new account
 
     console.log(
-      `✅ Account ${username} saved successfully with ${importantCookies.length} cookies`
+      `✅ Account ${username} saved successfully with ${importantCookies.length} cookies`,
     );
 
     return {

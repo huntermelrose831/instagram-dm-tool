@@ -1,4 +1,4 @@
-# Instagram DM Tool
+# TurboDM
 
 A desktop application for Instagram direct messaging automation, lead generation, and account management. Built with Electron, React, and a Node.js/Express backend.
 
@@ -51,6 +51,10 @@ Instagram interactions are performed through Puppeteer with the stealth plugin, 
 - Electron (main process spawns backend, loads Vite-built frontend)
 - electron-builder for packaging to AppImage (Linux) and .exe (Windows)
 - macOS is not supported
+
+## No External Services Required
+
+TurboDM runs entirely on your local machine. There is no cloud backend, no API server to configure, and no account registration. All data is stored in a local SQLite database.
 
 ## Project Structure
 
@@ -191,4 +195,4 @@ Commercial - see [LICENSE.txt](LICENSE.txt) for details.
 
 ---
 
-\*\*
+_TurboDM - Professional Instagram Outreach_
